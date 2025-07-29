@@ -2,4 +2,4 @@ pandas
 openpyxl
 pypdf
 python-dotenv
-google-genai
+google-generativeai==1.27.0
