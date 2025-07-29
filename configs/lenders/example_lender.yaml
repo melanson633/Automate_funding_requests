@@ -1,1 +1,2 @@
-# Example lender config
+logging:
+  level: DEBUG
