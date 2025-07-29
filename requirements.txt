@@ -1,5 +1,7 @@
 pandas>=2.2
 openpyxl
 pypdf
+Pillow
+pytesseract
 python-dotenv
 google-generativeai==1.27.0

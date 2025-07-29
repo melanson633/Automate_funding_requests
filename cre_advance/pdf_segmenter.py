@@ -1,3 +1,85 @@
-"""Module placeholder."""
-# TODO
-pass
+from __future__ import annotations
+
+"""PDF segmentation utilities."""
+
+from pathlib import Path
+from typing import Any, List
+
+import pytesseract
+from PIL import Image
+from pypdf import PdfReader
+
+from . import ai_gemini
+from .utils.errors import PDFSegmentationError
+from .utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+def _page_text(page: Any, ocr_cfg: dict) -> str:
+    """Return extracted text or OCR result for ``page``."""
+    text = page.extract_text() or ""
+    if text.strip():
+        return text
+
+    tesseract_cmd = ocr_cfg.get("tesseract_cmd")
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
+    texts = []
+    for img in page.images:
+        try:
+            pil_img = img.image if hasattr(img, "image") else Image.open(img.data)
+            texts.append(pytesseract.image_to_string(pil_img, lang="eng"))
+        except Exception as exc:  # noqa: BLE001 broad to avoid OCR crash
+            logger.warning("OCR failed on image: %s", exc)
+    return "\n".join(texts)
+
+
+def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
+    """Add ``end_page`` to each invoice entry."""
+    manifest = sorted(manifest, key=lambda m: m.get("start_page", 0))
+    for idx, item in enumerate(manifest):
+        next_start = (
+            manifest[idx + 1]["start_page"]
+            if idx + 1 < len(manifest)
+            else total_pages + 1
+        )
+        item["end_page"] = next_start - 1
+    return manifest
+
+
+def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
+    pdf_cfg = cfg.get("pdf", {})
+    min_conf = float(pdf_cfg.get("min_conf", 0.0))
+
+    low_conf_pages = 0
+    covered_pages: set[int] = set()
+    for item in manifest:
+        start = int(item.get("start_page", 0))
+        end = int(item.get("end_page", start))
+        conf = float(item.get("confidence", 1.0))
+        if conf < min_conf:
+            low_conf_pages += max(0, end - start + 1)
+        covered_pages.update(range(start, end + 1))
+
+    unmatched = total_pages - len(covered_pages)
+    if total_pages and (
+        low_conf_pages / total_pages > 0.4 or unmatched / total_pages > 0.4
+    ):
+        raise PDFSegmentationError("PDF segmentation confidence too low")
+
+
+def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
+    """Return invoice manifest with page ranges for ``pdf_path``."""
+    reader = PdfReader(str(pdf_path))
+    ocr_cfg = cfg.get("ocr", {})
+    texts = [_page_text(p, ocr_cfg) for p in reader.pages]
+
+    manifest = ai_gemini.segment_pdf(texts)
+    if not manifest:
+        raise PDFSegmentationError("No invoices detected")
+
+    manifest = _derive_ranges(manifest, len(reader.pages))
+    _validate(manifest, len(reader.pages), cfg)
+    return manifest
