@@ -1,1 +1,3 @@
-# Default configs
+logging:
+  level: INFO
+  file: logs/cre_advance.log
