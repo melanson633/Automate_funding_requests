@@ -16,11 +16,11 @@ sys.modules.setdefault("google.generativeai", genai_stub)  # noqa: E402
 from cre_advance import excel_normalizer  # noqa: E402
 
 
-def _create_workbook(path: Path) -> None:
+def _create_workbook(path: Path, header_row: int = 4) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Driver"
-    for _ in range(3):
+    for _ in range(header_row - 1):
         ws.append([])
     ws.append(["Date", "Amount"])
     ws.append(["2024-01-01", "100"])
@@ -60,3 +60,23 @@ def test_normalize_basic(monkeypatch) -> None:
         assert pd.api.types.is_datetime64_any_dtype(normalized["Date"])
         assert normalized.loc[1, "Amount"] == -200.0
         assert not raw.empty
+
+
+def test_header_row_config(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        excel_path = Path(tmp) / "hdr.xlsx"
+        _create_workbook(excel_path, header_row=3)
+
+        monkeypatch.setattr(
+            excel_normalizer.ai_gemini,
+            "map_schema",
+            lambda h, s, f, cfg=None: {"Date": "Date", "Amount": "Amount"},
+        )
+        monkeypatch.setattr(
+            excel_normalizer.ai_gemini, "build_schema", lambda h, s, cfg=None: {}
+        )
+
+        cfg = {"lender": "x", "excel": {"fields": ["Date", "Amount"], "header_row": 3}}
+        normalized, _ = excel_normalizer.normalize([excel_path], cfg)
+
+        assert list(normalized.columns) == ["Date", "Amount"]

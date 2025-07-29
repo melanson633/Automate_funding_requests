@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, List
+from concurrent.futures import ThreadPoolExecutor
 
 import pytesseract
 from PIL import Image
@@ -74,7 +75,8 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
     """Return invoice manifest with page ranges for ``pdf_path``."""
     reader = PdfReader(str(pdf_path))
     ocr_cfg = cfg.get("ocr", {})
-    texts = [_page_text(p, ocr_cfg) for p in reader.pages]
+    with ThreadPoolExecutor() as ex:
+        texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
 
     manifest = ai_gemini.segment_pdf(texts)
     if not manifest:

@@ -74,3 +74,23 @@ def test_segment_low_conf(monkeypatch) -> None:
 
     with pytest.raises(pdf_segmenter.PDFSegmentationError):
         pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_conf": 0.8}})
+
+
+def test_page_text_uses_ocr(monkeypatch):
+    page = types.SimpleNamespace(
+        extract_text=lambda: "",
+        images=[types.SimpleNamespace(image="img")],
+    )
+
+    called = {}
+
+    def fake_ocr(img, lang="eng"):
+        called["ocr"] = True
+        return "hello"
+
+    monkeypatch.setattr(pdf_segmenter.pytesseract, "image_to_string", fake_ocr)
+
+    text = pdf_segmenter._page_text(page, {"tesseract_cmd": None})
+
+    assert text.strip() == "hello"
+    assert called.get("ocr")
