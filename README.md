@@ -61,13 +61,20 @@ cp .env.example .env
 
 Running the Pipeline
 
-Place your raw Yardi-exported Excel and PDF files into the data/input/ directory.
+Place your raw Yardi-exported Excel and PDF files into the ``data/input/`` directory.
 
-Run the automation script:
+Run the automation script with the required arguments:
 
-python bin/process_advance.py
+```bash
+python bin/process_advance.py \
+  --excel Funding_Request_Template.xlsx \
+  --yardi Expense_Report.xlsx DataGridExport.xlsx \
+  --pdf Invoices.pdf \
+  --lender example_lender \
+  --output data/output
+```
 
-Processed funding packages will be available in the data/output/ directory.
+Processed funding packages will be saved under the specified output directory.
 
 Dependencies
 	•	Python
