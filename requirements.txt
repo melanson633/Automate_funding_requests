@@ -1,6 +1,7 @@
 pandas>=2.2
 openpyxl
 pypdf
+python-Levenshtein
 Pillow
 pytesseract
 python-dotenv

@@ -13,3 +13,7 @@ class PDFSegmentationError(Exception):
 
 class NormalizationError(Exception):
     """Raised when Excel normalization encounters invalid data."""
+
+
+class PackagingError(Exception):
+    """Raised when file packaging fails due to mismatched data."""

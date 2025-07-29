@@ -2,7 +2,12 @@
 
 from .env import get_config
 from .logging import get_logger
-from .errors import ConfigError, PDFSegmentationError, NormalizationError
+from .errors import (
+    ConfigError,
+    PDFSegmentationError,
+    NormalizationError,
+    PackagingError,
+)
 
 __all__ = [
     "get_config",
@@ -10,4 +15,5 @@ __all__ = [
     "ConfigError",
     "PDFSegmentationError",
     "NormalizationError",
+    "PackagingError",
 ]
