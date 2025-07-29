@@ -88,6 +88,13 @@ Development Notes
 	•	Configuration files for lender-specific adjustments should be placed in configs/lenders/.
 	•	Utilize Cursor IDE with predefined rules in .cursor/config.json for intelligent development assistance.
 
+Running Tests
+    Execute the unit tests and style checks before committing:
+    ```bash
+    pre-commit run --all-files  # if configured
+    pytest -q
+    ```
+
 ⸻
 
 Happy automating!
