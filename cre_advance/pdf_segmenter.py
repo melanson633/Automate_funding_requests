@@ -52,7 +52,8 @@ def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
 
 def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
     pdf_cfg = cfg.get("pdf", {})
-    min_conf = float(pdf_cfg.get("min_conf", 0.0))
+    min_conf = float(pdf_cfg.get("min_conf", cfg.get("min_confidence", 0.0)))
+    unmatched_threshold = float(cfg.get("unmatched_threshold", 0.4))
 
     low_conf_pages = 0
     covered_pages: set[int] = set()
@@ -66,7 +67,8 @@ def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
 
     unmatched = total_pages - len(covered_pages)
     if total_pages and (
-        low_conf_pages / total_pages > 0.4 or unmatched / total_pages > 0.4
+        low_conf_pages / total_pages > unmatched_threshold
+        or unmatched / total_pages > unmatched_threshold
     ):
         raise PDFSegmentationError("PDF segmentation confidence too low")
 
@@ -78,7 +80,7 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
     with ThreadPoolExecutor() as ex:
         texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
 
-    manifest = ai_gemini.segment_pdf(texts)
+    manifest = ai_gemini.segment_pdf(texts, cfg)
     if not manifest:
         raise PDFSegmentationError("No invoices detected")
 

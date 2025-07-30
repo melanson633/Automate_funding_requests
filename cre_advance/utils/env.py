@@ -22,7 +22,15 @@ from dotenv import load_dotenv
 from .errors import ConfigError
 
 _REQUIRED_ENV_VARS = ["GOOGLE_API_KEY"]
-_REQUIRED_KEYS = ["logging"]
+_REQUIRED_KEYS = [
+    "logging",
+    "mapping_coverage_threshold",
+    "unmatched_threshold",
+    "min_confidence",
+    "gemini_model",
+    "gemini_temperature",
+    "gemini_max_retries",
+]
 
 
 def _merge_dicts(base: dict, overrides: dict) -> dict:
