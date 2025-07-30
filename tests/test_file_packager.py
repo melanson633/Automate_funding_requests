@@ -38,10 +38,11 @@ def test_match_invoices_order() -> None:
         },
     ]
 
-    ordered, unmatched = file_packager._match_invoices(df, manifest)
+    ordered, unmatched_rows, unmatched_pdf = file_packager._match_invoices(df, manifest)
 
     assert [m["invoice_number"] for m in ordered] == ["1", "2"]
-    assert unmatched == []
+    assert unmatched_rows == []
+    assert unmatched_pdf == []
 
 
 def test_package_orders_pdf(monkeypatch, tmp_path):
@@ -86,8 +87,44 @@ def test_package_orders_pdf(monkeypatch, tmp_path):
         "template.xlsx",
         "dummy.pdf",
         tmp_path,
+        {"unmatched_threshold": 0.4},
     )
 
     assert pdf_order == ["1", "2"]
     assert summary["unmatched_rows"] == []
 
+
+def test_package_warns_on_unmatched(monkeypatch, tmp_path):
+    df = pd.DataFrame(
+        {
+            "invoice_number": ["1", "2"],
+            "vendor": ["A", "B"],
+            "amount": [100.0, 200.0],
+            "date": ["2024-01-01", "2024-02-01"],
+        }
+    )
+    manifest = [
+        {
+            "invoice_number": "1",
+            "vendor": "A",
+            "amount": 100.0,
+            "date": "2024-01-01",
+            "start_page": 1,
+            "end_page": 1,
+        }
+    ]
+
+    monkeypatch.setattr(file_packager, "_build_pdf", lambda *a, **k: None)
+    monkeypatch.setattr(file_packager, "_write_excel", lambda *a, **k: None)
+
+    summary = file_packager.package(
+        df,
+        manifest,
+        "template.xlsx",
+        "dummy.pdf",
+        tmp_path,
+        {"unmatched_threshold": 0.0},
+    )
+
+    assert len(summary["unmatched_rows"]) == 1
+    assert summary["warning"] is not None
