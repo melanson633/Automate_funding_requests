@@ -14,9 +14,10 @@ import time
 from typing import Any, Dict, List
 
 import google.generativeai as genai
+import requests
+from google.api_core import exceptions as google_exceptions
 
 from .utils.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -56,15 +57,21 @@ def _request_json(
     cfg: Dict[str, Any] | None = None,
     temperature: float | None = None,
 ) -> Any:
-    """Send a prompt to Gemini and return parsed JSON or ``None``."""
+    """Send a prompt to Gemini and return parsed JSON or ``None``.
+
+    Network related errors are retried with exponential backoff. Prompt
+    validation or parsing failures are logged and raised without retrying.
+    """
     cfg = cfg or {}
     model = _get_client(cfg)
 
-    temp = temperature if temperature is not None else cfg.get("gemini_temperature", 0.2)
+    temp = (
+        temperature if temperature is not None else cfg.get("gemini_temperature", 0.2)
+    )
 
     # Add JSON instruction to prompt for older SDK
     json_prompt = f"{prompt}\n\nPlease respond with valid JSON only."
-    
+
     # Configure generation parameters for older SDK
     generation_config = genai.types.GenerationConfig(
         temperature=temp,
@@ -73,44 +80,79 @@ def _request_json(
 
     delay = 1.0
     max_retries = int(cfg.get("gemini_max_retries", _MAX_RETRIES))
+    last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
             logger.debug("Gemini prompt: %s", json_prompt)
             resp = model.generate_content(
                 json_prompt,
-                generation_config=generation_config
+                generation_config=generation_config,
             )
             logger.debug("Gemini raw response: %s", resp.text)
-            
-            # Parse JSON from response text
-            if resp.text:
-                # Clean up response text (remove markdown formatting if present)
-                text = resp.text.strip()
-                if text.startswith("```json"):
-                    text = text[7:]
-                if text.endswith("```"):
-                    text = text[:-3]
-                text = text.strip()
-                
-                data = json.loads(text)
-                return data
-            else:
+
+            if not resp.text:
                 logger.warning("Empty response from Gemini")
                 return None
-                
+
+            text = resp.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            return json.loads(text)
+
         except json.JSONDecodeError as exc:
-            logger.warning("JSON decode error on attempt %s: %s", attempt, exc)
-            logger.debug("Raw response text: %s", getattr(resp, 'text', 'No text'))
-            if attempt == max_retries:
-                raise RuntimeError("Failed to parse JSON response after retries") from exc
-        except Exception as exc:  # broad exception from SDK
-            logger.warning("Gemini attempt %s failed: %s", attempt, exc)
-            if attempt == max_retries:
-                raise RuntimeError("Gemini request failed after retries") from exc
-            
-        time.sleep(delay)
-        delay *= 2
-    return None
+            logger.error("Failed to decode JSON: %s", exc)
+            logger.error("Raw response text: %s", getattr(resp, "text", "<empty>"))
+            raise
+        except google_exceptions.BadRequest as exc:
+            logger.error("Gemini bad request: %s", exc)
+            logger.error("Prompt: %s", json_prompt)
+            logger.error("Temperature: %s", temp)
+            raise
+        except (
+            google_exceptions.DeadlineExceeded,
+            google_exceptions.ServiceUnavailable,
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            last_exc = exc
+            logger.warning(
+                "Transient Gemini error on attempt %s/%s: %s",
+                attempt,
+                max_retries,
+                exc,
+            )
+            if attempt < max_retries:
+                time.sleep(delay)
+                delay *= 2
+                continue
+        except google_exceptions.GoogleAPIError as exc:
+            logger.error("Gemini API error: %s", exc)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.warning(
+                "Unexpected Gemini error on attempt %s/%s: %s",
+                attempt,
+                max_retries,
+                exc,
+            )
+            if attempt < max_retries:
+                time.sleep(delay)
+                delay *= 2
+                continue
+        break
+
+    logger.error(
+        "Gemini request failed after %s attempts. Prompt: %s | temperature=%s | model=%s",
+        max_retries,
+        json_prompt,
+        temp,
+        cfg.get("gemini_model", _MODEL_NAME),
+    )
+    raise RuntimeError("Gemini request failed") from last_exc
 
 
 def map_schema(
@@ -124,7 +166,7 @@ def map_schema(
     prompt = (
         "Map the following spreadsheet column headers to canonical Invoice Log fields. "
         "Only use one of the provided target fields for each header and return a JSON "
-        "object where keys are the raw headers and values are the chosen target fields."\
+        "object where keys are the raw headers and values are the chosen target fields."
     )
     prompt += f"\nTarget fields: {', '.join(target_fields)}"
     prompt += f"\nHeaders: {', '.join(headers)}"
@@ -140,7 +182,9 @@ def map_schema(
     return result or {}
 
 
-def segment_pdf(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+def segment_pdf(
+    pages: List[str], cfg: Dict[str, Any] | None = None
+) -> List[Dict[str, Any]]:
     """Detect invoice boundaries within PDF pages."""
     cfg = cfg or {}
     joined_pages = "\n---\n".join(pages)
@@ -203,7 +247,9 @@ def extract_metadata(text: str, cfg: Dict[str, Any] | None = None) -> Dict[str, 
 
 
 def build_schema(
-    headers: List[str], sample_rows: List[Dict[str, Any]], cfg: Dict[str, Any] | None = None
+    headers: List[str],
+    sample_rows: List[Dict[str, Any]],
+    cfg: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Propose a canonical schema and mapping for new lenders."""
     cfg = cfg or {}
