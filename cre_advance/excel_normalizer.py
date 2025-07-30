@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable, Tuple
+from datetime import datetime
 
 import pandas as pd
 import yaml
@@ -90,15 +91,21 @@ def normalize(
             dest = (
                 Path(__file__).resolve().parents[1]
                 / "configs"
-                / "lenders"
-                / f"{lender}.yaml"
+                / "schema_versions"
+                / f"{lender}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.yaml"
             )
-            prompt = f"Write new schema to {dest}? [y/N] "
-            answer = input(prompt).strip().lower()
-            if answer == "y":
+            if cfg.get("auto_save_schemas", True):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with dest.open("w") as f:
                     yaml.safe_dump({"excel": proposal}, f)
+                logger.warning(
+                    "Low mapping coverage or schema builder forced. Saved inferred schema to %s. Review this file.",
+                    dest,
+                )
+            else:
+                logger.warning(
+                    "Low mapping coverage or schema builder forced but auto_save_schemas is disabled."
+                )
 
     normalized = raw_df.rename(columns=mapping)
 

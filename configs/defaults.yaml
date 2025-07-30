@@ -7,3 +7,4 @@ min_confidence: 0.0
 gemini_model: gemini-1.5-flash
 gemini_temperature: 0.2
 gemini_max_retries: 3
+auto_save_schemas: true
