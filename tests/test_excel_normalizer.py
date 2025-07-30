@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+import yaml
 
 import pandas as pd
 from openpyxl import Workbook
@@ -80,3 +81,40 @@ def test_header_row_config(monkeypatch) -> None:
         normalized, _ = excel_normalizer.normalize([excel_path], cfg)
 
         assert list(normalized.columns) == ["Date", "Amount"]
+
+
+def test_auto_save_schema(monkeypatch, tmp_path) -> None:
+    excel_path = tmp_path / "auto.xlsx"
+    _create_workbook(excel_path)
+
+    monkeypatch.setattr(
+        excel_normalizer.ai_gemini,
+        "map_schema",
+        lambda h, s, f, cfg=None: {},
+    )
+
+    monkeypatch.setattr(
+        excel_normalizer.ai_gemini,
+        "build_schema",
+        lambda h, s, cfg=None: {
+            "mapping": {"Date": "InvoiceDate"},
+            "fields": ["InvoiceDate"],
+        },
+    )
+
+    cfg = {"lender": "example_lender", "excel": {"fields": ["InvoiceDate"]}}
+
+    version_dir = Path(__file__).resolve().parents[1] / "configs" / "schema_versions"
+    if version_dir.exists():
+        for f in version_dir.glob("example_lender_*.yaml"):
+            f.unlink()
+
+    normalized, _ = excel_normalizer.normalize([excel_path], cfg)
+
+    files = list(version_dir.glob("example_lender_*.yaml"))
+    assert len(files) == 1
+    assert "InvoiceDate" in normalized.columns
+    with files[0].open() as f:
+        data = yaml.safe_load(f)
+    assert data["excel"]["mapping"]["Date"] == "InvoiceDate"
+    files[0].unlink()
