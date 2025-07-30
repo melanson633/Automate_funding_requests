@@ -125,7 +125,8 @@ def package(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ordered, unmatched = _match_invoices(normalized_df, manifest)
-    if len(normalized_df.index) and len(unmatched) / len(normalized_df.index) > 0.4:
+    unmatched_threshold = float(cfg.get("unmatched_threshold", 0.4))
+    if len(normalized_df.index) and len(unmatched) / len(normalized_df.index) > unmatched_threshold:
         raise NormalizationError("Too many unmatched invoices")
 
     ordered_df = normalized_df.drop(index=unmatched).reset_index(drop=True)

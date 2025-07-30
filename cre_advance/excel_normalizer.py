@@ -79,10 +79,11 @@ def normalize(
     samples = raw_df.head(5).to_dict(orient="records")
     target_fields = excel_cfg.get("fields", [])
 
-    mapping = ai_gemini.map_schema(headers, samples, target_fields)
+    mapping = ai_gemini.map_schema(headers, samples, target_fields, cfg)
     coverage = len(mapping) / len(headers) if headers else 0
-    if coverage < 0.6 or excel_cfg.get("force_schema_builder"):
-        proposal = ai_gemini.build_schema(headers, samples)
+    mapping_threshold = float(cfg.get("mapping_coverage_threshold", 0.6))
+    if coverage < mapping_threshold or excel_cfg.get("force_schema_builder"):
+        proposal = ai_gemini.build_schema(headers, samples, cfg)
         mapping = proposal.get("mapping", {})
         if proposal:
             lender = cfg.get("lender", "unknown")
@@ -102,7 +103,8 @@ def normalize(
     normalized = raw_df.rename(columns=mapping)
 
     missing = [f for f in target_fields if f not in normalized.columns]
-    if target_fields and len(missing) / len(target_fields) >= 0.4:
+    unmatched_threshold = float(cfg.get("unmatched_threshold", 0.4))
+    if target_fields and len(missing) / len(target_fields) >= unmatched_threshold:
         raise NormalizationError("Too many columns unmapped")
 
     normalized = _apply_casts(normalized)

@@ -1,3 +1,9 @@
 logging:
   level: INFO
   file: logs/cre_advance.log
+mapping_coverage_threshold: 0.6
+unmatched_threshold: 0.4
+min_confidence: 0.0
+gemini_model: gemini-1.5-flash
+gemini_temperature: 0.2
+gemini_max_retries: 3

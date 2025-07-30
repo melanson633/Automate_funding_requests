@@ -19,45 +19,61 @@ from .utils.logging import get_logger
 
 
 logger = get_logger(__name__)
+
 _MODEL_NAME = "gemini-1.5-flash"
 _MAX_RETRIES = 3
 
 _client = None
+_client_model = None
 
 
-def _init_client():
+def _init_client(cfg: Dict[str, Any] | None = None):
     """Initialize Gemini client with API key."""
+    cfg = cfg or {}
+    model_name = cfg.get("gemini_model", _MODEL_NAME)
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError(
             "GOOGLE_API_KEY not set. Create a .env file with your API key and retry."
         )
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(_MODEL_NAME)
+    return genai.GenerativeModel(model_name)
 
 
-def _get_client():
-    global _client
-    if _client is None:
-        _client = _init_client()
+def _get_client(cfg: Dict[str, Any] | None = None):
+    global _client, _client_model
+    cfg = cfg or {}
+    model_name = cfg.get("gemini_model", _MODEL_NAME)
+    if _client is None or _client_model != model_name:
+        _client = _init_client(cfg)
+        _client_model = model_name
     return _client
 
 
-def _request_json(prompt: str, schema: dict, temperature: float = 0.2) -> Any:
+def _request_json(
+    prompt: str,
+    schema: dict,
+    cfg: Dict[str, Any] | None = None,
+    temperature: float | None = None,
+) -> Any:
     """Send a prompt to Gemini and return parsed JSON or ``None``."""
-    model = _get_client()
+    cfg = cfg or {}
+    model = _get_client(cfg)
+
+    temp = temperature if temperature is not None else cfg.get("gemini_temperature", 0.2)
 
     # Add JSON instruction to prompt for older SDK
     json_prompt = f"{prompt}\n\nPlease respond with valid JSON only."
     
     # Configure generation parameters for older SDK
     generation_config = genai.types.GenerationConfig(
-        temperature=temperature,
+        temperature=temp,
         max_output_tokens=2048,
     )
 
     delay = 1.0
-    for attempt in range(1, _MAX_RETRIES + 1):
+    max_retries = int(cfg.get("gemini_max_retries", _MAX_RETRIES))
+    for attempt in range(1, max_retries + 1):
         try:
             logger.debug("Gemini prompt: %s", json_prompt)
             resp = model.generate_content(
@@ -85,11 +101,11 @@ def _request_json(prompt: str, schema: dict, temperature: float = 0.2) -> Any:
         except json.JSONDecodeError as exc:
             logger.warning("JSON decode error on attempt %s: %s", attempt, exc)
             logger.debug("Raw response text: %s", getattr(resp, 'text', 'No text'))
-            if attempt == _MAX_RETRIES:
+            if attempt == max_retries:
                 raise RuntimeError("Failed to parse JSON response after retries") from exc
         except Exception as exc:  # broad exception from SDK
             logger.warning("Gemini attempt %s failed: %s", attempt, exc)
-            if attempt == _MAX_RETRIES:
+            if attempt == max_retries:
                 raise RuntimeError("Gemini request failed after retries") from exc
             
         time.sleep(delay)
@@ -115,7 +131,12 @@ def map_schema(
     prompt += "\nSample rows:" + json.dumps(sample_rows, indent=2)
 
     schema = {"type": "object", "additionalProperties": {"type": "string"}}
-    result = _request_json(prompt, schema, temperature=cfg.get("temperature", 0.1))
+    result = _request_json(
+        prompt,
+        schema,
+        cfg,
+        temperature=cfg.get("gemini_temperature", 0.1),
+    )
     return result or {}
 
 
@@ -144,7 +165,12 @@ def segment_pdf(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dic
             "required": ["start_page"],
         },
     }
-    result = _request_json(prompt, schema, temperature=cfg.get("temperature", 0.2))
+    result = _request_json(
+        prompt,
+        schema,
+        cfg,
+        temperature=cfg.get("gemini_temperature", 0.2),
+    )
     return result or []
 
 
@@ -164,7 +190,12 @@ def extract_metadata(text: str, cfg: Dict[str, Any] | None = None) -> Dict[str, 
             "amount": {"type": "string"},
         },
     }
-    result = _request_json(prompt, schema, temperature=cfg.get("temperature", 0.1))
+    result = _request_json(
+        prompt,
+        schema,
+        cfg,
+        temperature=cfg.get("gemini_temperature", 0.1),
+    )
     return result or {}
 
 
@@ -189,5 +220,10 @@ def build_schema(
             "mapping": {"type": "object", "additionalProperties": {"type": "string"}},
         },
     }
-    result = _request_json(prompt, schema, temperature=cfg.get("temperature", 0.1))
+    result = _request_json(
+        prompt,
+        schema,
+        cfg,
+        temperature=cfg.get("gemini_temperature", 0.1),
+    )
     return result or {}
