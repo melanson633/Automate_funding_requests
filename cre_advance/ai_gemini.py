@@ -13,35 +13,30 @@ import os
 import time
 from typing import Any, Dict, List
 
-from google import generativeai as genai
-from google.generativeai import types
+import google.generativeai as genai
 
 from .utils.logging import get_logger
 
 
 logger = get_logger(__name__)
-_MODEL_NAME = "gemini-2.5-pro"
+_MODEL_NAME = "gemini-1.5-flash"
 _MAX_RETRIES = 3
 
-_client: genai.Client | None = None
+_client = None
 
 
-def _init_client() -> genai.Client:
-    """Instantiate and return a Gemini client."""
+def _init_client():
+    """Initialize Gemini client with API key."""
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError(
             "GOOGLE_API_KEY not set. Create a .env file with your API key and retry."
         )
-    return genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(
-            api_version="v1", retry_options=types.RetryOptions(max_retries=_MAX_RETRIES)
-        ),
-    )
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(_MODEL_NAME)
 
 
-def _get_client() -> genai.Client:
+def _get_client():
     global _client
     if _client is None:
         _client = _init_client()
@@ -50,32 +45,55 @@ def _get_client() -> genai.Client:
 
 def _request_json(prompt: str, schema: dict, temperature: float = 0.2) -> Any:
     """Send a prompt to Gemini and return parsed JSON or ``None``."""
-    client = _get_client()
+    model = _get_client()
 
-    config = types.GenerateContentConfig(
+    # Add JSON instruction to prompt for older SDK
+    json_prompt = f"{prompt}\n\nPlease respond with valid JSON only."
+    
+    # Configure generation parameters for older SDK
+    generation_config = genai.types.GenerationConfig(
         temperature=temperature,
-        response_mime_type="application/json",
-        response_schema=schema,
+        max_output_tokens=2048,
     )
 
     delay = 1.0
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            logger.debug("Gemini prompt: %s", prompt)
-            resp = client.models.generate_content(
-                model=_MODEL_NAME, contents=prompt, config=config
+            logger.debug("Gemini prompt: %s", json_prompt)
+            resp = model.generate_content(
+                json_prompt,
+                generation_config=generation_config
             )
-            logger.debug("Gemini raw response: %s", getattr(resp, "text", resp))
-            data = getattr(resp, "parsed", None)
-            if data is None:
-                data = json.loads(getattr(resp, "text", ""))
-            return data
+            logger.debug("Gemini raw response: %s", resp.text)
+            
+            # Parse JSON from response text
+            if resp.text:
+                # Clean up response text (remove markdown formatting if present)
+                text = resp.text.strip()
+                if text.startswith("```json"):
+                    text = text[7:]
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+                
+                data = json.loads(text)
+                return data
+            else:
+                logger.warning("Empty response from Gemini")
+                return None
+                
+        except json.JSONDecodeError as exc:
+            logger.warning("JSON decode error on attempt %s: %s", attempt, exc)
+            logger.debug("Raw response text: %s", getattr(resp, 'text', 'No text'))
+            if attempt == _MAX_RETRIES:
+                raise RuntimeError("Failed to parse JSON response after retries") from exc
         except Exception as exc:  # broad exception from SDK
             logger.warning("Gemini attempt %s failed: %s", attempt, exc)
             if attempt == _MAX_RETRIES:
                 raise RuntimeError("Gemini request failed after retries") from exc
-            time.sleep(delay)
-            delay *= 2
+            
+        time.sleep(delay)
+        delay *= 2
     return None
 
 

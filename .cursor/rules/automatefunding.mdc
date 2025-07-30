@@ -1,0 +1,37 @@
+---
+description: >
+  Automate CRE funding requests.  Provides context about the project’s purpose,
+  stack, architecture and coding conventions.  Always apply these rules.
+globs: []
+alwaysApply: true
+---
+# Project: Automate_funding_requests
+
+## Overview
+- **Purpose:** Automate creation of lender‑ready funding packages for commercial real‑estate (CRE) properties by normalising Yardi Excel exports, segmenting multi‑invoice PDFs and packaging them into a final Excel invoice log, reordered PDF and JSON report:contentReference[oaicite:13]{index=13}.
+- **Pipeline:** A CLI (`bin/process_advance.py`) parses command‑line arguments and calls `cre_advance/pipeline.py`, which orchestrates three phases: Excel normalisation, PDF segmentation and packaging:contentReference[oaicite:14]{index=14}.
+
+## Stack & Architecture
+- **Language:** Python 3 with type hints and PEP‑8 style.  Use pandas for data frames, openpyxl for Excel operations, pypdf for PDF manipulation, Pillow/pytesseract for OCR and python‑dotenv for environment variables:contentReference[oaicite:15]{index=15}.
+- **AI integration:** Use `cre_advance/ai_gemini.py` to interact with Google’s Gemini 2.5 Pro for schema mapping and PDF segmentation.  All prompts should be crafted to return JSON and include retry logic with exponential backoff:contentReference[oaicite:16]{index=16}.
+- **Configuration:** Load defaults from `configs/defaults.yaml` and override with lender‑specific YAML in `configs/lenders/`.  Require a `.env` file containing `GOOGLE_API_KEY`:contentReference[oaicite:17]{index=17}.
+- **Logging:** Use `cre_advance/utils/logging.py:get_logger` to configure both console and file loggers.  Logging level is set by `LOG_LEVEL` (default INFO):contentReference[oaicite:18]{index=18}.
+- **Testing:** Use pytest; tests live in the `tests/` directory.  Always write tests for new features and run `pytest -q` before committing:contentReference[oaicite:19]{index=19}.
+
+## Code Patterns
+- Write pure, modular functions with clear inputs and outputs.  The pipeline orchestrates functions like `normalize` in `excel_normalizer.py`, `segment` in `pdf_segmenter.py` and `package` in `file_packager.py`:contentReference[oaicite:20]{index=20}.
+- Use type hints for all functions.  When raising errors, prefer custom exceptions (`ConfigError`, `PDFSegmentationError`, `NormalizationError`, `PackagingError`):contentReference[oaicite:21]{index=21}.
+- Perform validation and error handling: check coverage thresholds for schema mapping and raise `NormalizationError` when unmapped columns exceed 40%:contentReference[oaicite:22]{index=22}; raise `PDFSegmentationError` when segmentation confidence is low:contentReference[oaicite:23]{index=23}; raise `NormalizationError` in file packaging if too many invoices are unmatched:contentReference[oaicite:24]{index=24}.
+- Use logging to record info/warning/errors; avoid interactive `input()` except for schema creation prompts in `excel_normalizer` (ensure agent prompts the user before writing to disk):contentReference[oaicite:25]{index=25}.
+- When matching invoices, use Levenshtein ratio for fuzzy matching and require a minimum score of 2.0 before accepting:contentReference[oaicite:26]{index=26}.
+
+## Style Guidelines
+- **Naming:** Use `snake_case` for functions, variables and filenames.  Module-level constants should be uppercase.  Prefix internal helper functions with an underscore (e.g., `_read_workbook`):contentReference[oaicite:27]{index=27}.
+- **Docstrings:** Provide descriptive docstrings with parameters and return values for all public functions and classes.
+- **Error handling:** Avoid broad `except:`; catch specific exceptions and log meaningful error messages.  Use `logger.error()` before exiting CLI scripts:contentReference[oaicite:28]{index=28}.
+- **Environment:** Never hard‑code secrets; load API keys via `.env` and validate required environment variables using `get_config`:contentReference[oaicite:29]{index=29}.
+
+## Development Workflow
+- Use `pre-commit` hooks and `pytest` to run tests and style checks before committing:contentReference[oaicite:30]{index=30}.
+- When adding lenders, place new YAML configs under `configs/lenders/` and update documentation in `README.md` accordingly.
+- For large PDF or Excel files, avoid loading entire file context into Cursor; instead, use `@` references to bring in only relevant code snippets or configuration files to conserve token budget:contentReference[oaicite:31]{index=31}.
