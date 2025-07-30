@@ -52,8 +52,10 @@ def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
 
 def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
     pdf_cfg = cfg.get("pdf", {})
-    min_conf = float(pdf_cfg.get("min_conf", cfg.get("min_confidence", 0.0)))
-    unmatched_threshold = float(cfg.get("unmatched_threshold", 0.4))
+    min_conf = float(pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0)))
+    unmatched_threshold = float(
+        pdf_cfg.get("unmatched_threshold", cfg.get("unmatched_threshold", 0.4))
+    )
 
     low_conf_pages = 0
     covered_pages: set[int] = set()
@@ -81,9 +83,23 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
         texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
 
     manifest = ai_gemini.segment_pdf(texts, cfg)
-    if not manifest:
-        raise PDFSegmentationError("No invoices detected")
 
-    manifest = _derive_ranges(manifest, len(reader.pages))
+    if not manifest:
+        logger.warning("Gemini returned no invoices; using page-per-invoice fallback")
+        manifest = [
+            {
+                "start_page": i + 1,
+                "end_page": i + 1,
+                "vendor": "",
+                "invoice_number": "",
+                "date": "",
+                "amount": "",
+                "confidence": 1.0,
+            }
+            for i in range(len(reader.pages))
+        ]
+    else:
+        manifest = _derive_ranges(manifest, len(reader.pages))
+
     _validate(manifest, len(reader.pages), cfg)
     return manifest

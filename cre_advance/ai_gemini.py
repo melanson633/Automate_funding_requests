@@ -147,8 +147,10 @@ def segment_pdf(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dic
     prompt = (
         "Given the OCR text for each page of a PDF, identify the start page of each "
         "invoice and return metadata. Provide a JSON array of objects with fields "
-        "'start_page', 'vendor', 'invoice_number', 'date', and 'amount'. Page numbers "
-        "are 1-indexed.\n" + joined_pages
+        "'start_page', 'vendor', 'invoice_number', 'date', 'amount', and "
+        "'confidence'. Confidence is a float between 0 and 1 expressing how sure "
+        "you are that the invoice starts on the given page. Page numbers are 1-indexed.\n"
+        + joined_pages
     )
 
     schema = {
@@ -161,6 +163,7 @@ def segment_pdf(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dic
                 "invoice_number": {"type": "string"},
                 "date": {"type": "string"},
                 "amount": {"type": "string"},
+                "confidence": {"type": "number"},
             },
             "required": ["start_page"],
         },

@@ -54,7 +54,7 @@ def test_segment_success(monkeypatch) -> None:
 
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "segment_pdf", fake_segment)
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_conf": 0.8}})
+    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_confidence": 0.8}})
 
     assert manifest[0]["end_page"] == 1
     assert manifest[1]["end_page"] == 2
@@ -73,7 +73,7 @@ def test_segment_low_conf(monkeypatch) -> None:
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "segment_pdf", fake_segment)
 
     with pytest.raises(pdf_segmenter.PDFSegmentationError):
-        pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_conf": 0.8}})
+        pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_confidence": 0.8}})
 
 
 def test_page_text_uses_ocr(monkeypatch):
@@ -94,3 +94,14 @@ def test_page_text_uses_ocr(monkeypatch):
 
     assert text.strip() == "hello"
     assert called.get("ocr")
+
+
+def test_segment_fallback(monkeypatch):
+    pages = [FakePage("A"), FakePage("B"), FakePage("C")]
+    monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
+    monkeypatch.setattr(pdf_segmenter.ai_gemini, "segment_pdf", lambda t, cfg=None: [])
+
+    manifest = pdf_segmenter.segment("dummy.pdf", {})
+
+    assert len(manifest) == 3
+    assert all(m["start_page"] == i + 1 and m["end_page"] == i + 1 for i, m in enumerate(manifest))
