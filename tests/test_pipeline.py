@@ -19,16 +19,16 @@ def test_run_orchestrates(monkeypatch):
         called["config"] = lender
         return {}
 
-    def fake_normalize(yardi, cfg):
+    def fake_normalize(yardi, cfg, metrics=None):
         called["normalize"] = list(yardi)
         df = pd.DataFrame({"a": [1]})
         return df, df
 
-    def fake_segment(pdf, cfg):
+    def fake_segment(pdf, cfg, metrics=None):
         called["segment"] = pdf
         return ["manifest"]
 
-    def fake_package(df, manifest, template, pdf, output, cfg):
+    def fake_package(df, manifest, template, pdf, output, cfg, metrics=None):
         called["package"] = (template, pdf, output)
         return {
             "excel": "x.xlsx",
@@ -77,10 +77,10 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
     monkeypatch.setattr(
         pipeline,
         "excel_normalizer",
-        types.SimpleNamespace(normalize=lambda y, c: (df, df)),
+        types.SimpleNamespace(normalize=lambda y, c, metrics=None: (df, df)),
     )
 
-    def fail_segment(pdf, cfg):
+    def fail_segment(pdf, cfg, metrics=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
@@ -127,17 +127,21 @@ def test_resume_skips_ai(monkeypatch, tmp_path):
     monkeypatch.setattr(
         pipeline,
         "excel_normalizer",
-        types.SimpleNamespace(normalize=lambda y, c: called.setdefault("norm", True)),
+        types.SimpleNamespace(
+            normalize=lambda y, c, metrics=None: called.setdefault("norm", True)
+        ),
     )
     monkeypatch.setattr(
         pipeline,
         "pdf_segmenter",
-        types.SimpleNamespace(segment=lambda p, c: called.setdefault("seg", True)),
+        types.SimpleNamespace(
+            segment=lambda p, c, metrics=None: called.setdefault("seg", True)
+        ),
     )
     monkeypatch.setattr(
         pipeline,
         "file_packager",
-        types.SimpleNamespace(package=lambda *a, **k: {"excel": "x"}),
+        types.SimpleNamespace(package=lambda *a, metrics=None, **k: {"excel": "x"}),
     )
 
     args = types.SimpleNamespace(

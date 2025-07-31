@@ -15,7 +15,6 @@ from Levenshtein import ratio
 from openpyxl import load_workbook
 from pypdf import PdfReader, PdfWriter
 
-from .utils.errors import NormalizationError
 from .utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -150,12 +149,14 @@ def package(
     pdf_path: str | Path,
     output_dir: str | Path,
     cfg: dict | None = None,
+    metrics: dict | None = None,
 ) -> dict:
     """Build funding package and return paths to artefacts."""
     cfg = cfg or {}
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    logger.info("Packaging deliverables", extra={"context": "package"})
     ordered, unmatched_rows, unmatched_pdf = _match_invoices(
         normalized_df, manifest, cfg
     )
@@ -166,9 +167,15 @@ def package(
         and len(unmatched_rows) / len(normalized_df.index) > unmatched_threshold
     ):
         warning = "High unmatched ratio"
-        logger.warning(warning)
+        logger.warning(warning, extra={"context": "package"})
 
     ordered_df = normalized_df.drop(index=unmatched_rows).reset_index(drop=True)
+
+    if metrics is not None:
+        metrics["rows_processed"] = len(normalized_df.index)
+        metrics["rows_unmatched"] = len(unmatched_rows)
+        metrics["pdf_invoices"] = len(manifest)
+        metrics["pdf_unmatched"] = len(unmatched_pdf)
 
     pdf_out = output_dir / "invoices.pdf"
     _build_pdf(ordered, Path(pdf_path), pdf_out)
@@ -199,9 +206,12 @@ def package(
         "duplicate_excel_invoices": dups["excel"],
         "duplicate_pdf_invoices": dups["pdf"],
         "warning": warning,
+        "metrics": metrics or {},
     }
     report_out = output_dir / "report.json"
     report_out.write_text(json.dumps(report, indent=2))
+
+    logger.info("Finished packaging", extra={"context": "package"})
 
     return {
         "excel": str(excel_out),
@@ -212,4 +222,5 @@ def package(
         "duplicate_excel_invoices": dups["excel"],
         "duplicate_pdf_invoices": dups["pdf"],
         "warning": warning,
+        "metrics": metrics or {},
     }

@@ -33,7 +33,7 @@ def _page_text(page: Any, ocr_cfg: dict) -> str:
             pil_img = img.image if hasattr(img, "image") else Image.open(img.data)
             texts.append(pytesseract.image_to_string(pil_img, lang="eng"))
         except Exception as exc:  # noqa: BLE001 broad to avoid OCR crash
-            logger.warning("OCR failed on image: %s", exc)
+            logger.warning("OCR failed on image: %s", exc, extra={"context": "segment"})
     return "\n".join(texts)
 
 
@@ -50,7 +50,9 @@ def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
     return manifest
 
 
-def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> bool:
+def _validate(
+    manifest: List[dict], total_pages: int, cfg: dict, metrics: dict | None = None
+) -> bool:
     pdf_cfg = cfg.get("pdf", {})
     min_conf = float(pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0)))
     unmatched_threshold = float(
@@ -68,6 +70,10 @@ def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> bool:
         covered_pages.update(range(start, end + 1))
 
     unmatched = total_pages - len(covered_pages)
+    if metrics is not None:
+        metrics["low_conf_pages"] = low_conf_pages
+        metrics["unmatched_pages"] = unmatched
+        metrics["total_pages"] = total_pages
     if total_pages and (
         low_conf_pages / total_pages > unmatched_threshold
         or unmatched / total_pages > unmatched_threshold
@@ -76,17 +82,23 @@ def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> bool:
     return True
 
 
-def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
+def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> List[dict]:
     """Return invoice manifest with page ranges for ``pdf_path``."""
+    logger.info("Starting PDF segmentation", extra={"context": "segment"})
     reader = PdfReader(str(pdf_path))
     ocr_cfg = cfg.get("ocr", {})
     with ThreadPoolExecutor() as ex:
         texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
 
     manifest = ai_gemini.segment_pdf(texts, cfg)
+    if metrics is not None:
+        metrics["total_pages"] = len(reader.pages)
 
     if not manifest:
-        logger.warning("Gemini returned no invoices; using page-per-invoice fallback")
+        logger.warning(
+            "Gemini returned no invoices; using page-per-invoice fallback",
+            extra={"context": "segment"},
+        )
         manifest = [
             {
                 "start_page": i + 1,
@@ -102,11 +114,15 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
     else:
         manifest = _derive_ranges(manifest, len(reader.pages))
 
-    if not _validate(manifest, len(reader.pages), cfg):
+    if metrics is not None:
+        metrics["invoice_count"] = len(manifest)
+
+    if not _validate(manifest, len(reader.pages), cfg, metrics):
         pdf_cfg = cfg.get("pdf", {})
         if pdf_cfg.get("split_on_low_confidence"):
             logger.warning(
-                "Low confidence manifest detected; splitting PDF into single pages"
+                "Low confidence manifest detected; splitting PDF into single pages",
+                extra={"context": "segment"},
             )
             min_conf = float(
                 pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0))
@@ -137,4 +153,5 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
         else:
             raise PDFSegmentationError("PDF segmentation confidence too low")
 
+    logger.info("Finished PDF segmentation", extra={"context": "segment"})
     return manifest

@@ -14,8 +14,9 @@ Example
 'INFO'
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+
 import yaml
 from dotenv import load_dotenv
 
