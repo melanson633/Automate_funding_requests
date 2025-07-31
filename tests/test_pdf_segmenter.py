@@ -104,4 +104,29 @@ def test_segment_fallback(monkeypatch):
     manifest = pdf_segmenter.segment("dummy.pdf", {})
 
     assert len(manifest) == 3
-    assert all(m["start_page"] == i + 1 and m["end_page"] == i + 1 for i, m in enumerate(manifest))
+    assert all(
+        m["start_page"] == i + 1 and m["end_page"] == i + 1
+        for i, m in enumerate(manifest)
+    )
+
+
+def test_low_conf_split(monkeypatch) -> None:
+    pages = [FakePage("A"), FakePage("B")]
+    monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
+
+    def fake_segment(texts, cfg=None):
+        return [
+            {"start_page": 1, "confidence": 0.1},
+            {"start_page": 2, "confidence": 0.95},
+        ]
+
+    monkeypatch.setattr(pdf_segmenter.ai_gemini, "segment_pdf", fake_segment)
+
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf",
+        {"pdf": {"min_confidence": 0.8, "split_on_low_confidence": True}},
+    )
+
+    assert len(manifest) == 2
+    assert manifest[0]["start_page"] == 1 and manifest[0]["end_page"] == 1
+    assert manifest[1]["start_page"] == 2

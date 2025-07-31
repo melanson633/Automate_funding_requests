@@ -2,9 +2,10 @@ from __future__ import annotations
 
 """Utilities for normalising Yardi Excel exports."""
 
+import difflib
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Tuple
-from datetime import datetime
 
 import pandas as pd
 import yaml
@@ -14,6 +15,28 @@ from .utils.errors import NormalizationError
 from .utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _fuzzy_match(
+    headers: list[str], target_fields: list[str], threshold: float
+) -> dict:
+    """Return heuristic header → field mapping using simple string similarity."""
+    mapping: dict[str, str] = {}
+    used: set[str] = set()
+    for header in headers:
+        best_field = None
+        best_score = 0.0
+        for field in target_fields:
+            if field in used:
+                continue
+            score = difflib.SequenceMatcher(None, header.lower(), field.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_field = field
+        if best_field and best_score >= threshold:
+            mapping[header] = best_field
+            used.add(best_field)
+    return mapping
 
 
 def _read_workbook(path: Path, header_row: int) -> pd.DataFrame:
@@ -106,6 +129,12 @@ def normalize(
                 logger.warning(
                     "Low mapping coverage or schema builder forced but auto_save_schemas is disabled."
                 )
+
+    coverage = len(mapping) / len(headers) if headers else 0
+    if coverage < mapping_threshold:
+        fuzzy_ratio = float(excel_cfg.get("fuzzy_ratio", 0.6))
+        unmapped = [h for h in headers if h not in mapping]
+        mapping.update(_fuzzy_match(unmapped, target_fields, fuzzy_ratio))
 
     normalized = raw_df.rename(columns=mapping)
 
