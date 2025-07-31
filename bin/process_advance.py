@@ -53,6 +53,11 @@ def _print_summary(summary: dict) -> None:
         )
     else:
         print(f"{_Colour.CYAN}All rows matched successfully{_Colour.RESET}")
+    metrics = summary.get("metrics")
+    if metrics:
+        print("--- Metrics ---")
+        for k, v in metrics.items():
+            print(f"{k}: {v}")
 
 
 def main() -> None:

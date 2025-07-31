@@ -12,36 +12,53 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any, Dict
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Return a ``logging.Logger`` configured for console and file output.
+def _level_from_cfg(cfg: Dict[str, Any] | None = None) -> int:
+    """Return logging level from ``cfg`` or environment."""
 
-    The log level is determined by the ``LOG_LEVEL`` environment variable and
-    defaults to ``INFO``.
-    """
+    level_str = os.getenv("LOG_LEVEL")
+    if not level_str and cfg:
+        level_str = str(cfg.get("logging", {}).get("level", "INFO"))
+    level_str = (level_str or "INFO").upper()
+    return getattr(logging, level_str, logging.INFO)
+
+
+def get_logger(
+    name: str, cfg: Dict[str, Any] | None = None, context: Dict[str, Any] | None = None
+) -> logging.LoggerAdapter:
+    """Return a configured ``LoggerAdapter`` with optional context."""
+
     logger = logging.getLogger(name)
+
+    level = _level_from_cfg(cfg)
     if logger.handlers:
-        return logger
+        logger.setLevel(level)
+        for handler in logger.handlers:
+            handler.setLevel(level)
+    else:
+        logger.setLevel(level)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(context)s - %(message)s"
+        )
 
-    level_str = os.getenv("LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_str, logging.INFO)
-    logger.setLevel(level)
+        console = logging.StreamHandler()
+        console.setLevel(level)
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+        log_file = None
+        if cfg:
+            log_file = cfg.get("logging", {}).get("file")
+        if not log_file:
+            log_file = Path("logs") / f"{name}.log"
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
 
-    console = logging.StreamHandler()
-    console.setLevel(level)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
-
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    file_handler = logging.FileHandler(log_dir / f"{name}.log")
-    file_handler.setLevel(level)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    return logger
+    adapter = logging.LoggerAdapter(logger, extra={"context": context or ""})
+    return adapter

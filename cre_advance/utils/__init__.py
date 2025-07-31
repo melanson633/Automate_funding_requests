@@ -1,13 +1,9 @@
 """Utility helpers for the CRE Advance package."""
 
 from .env import get_config
+from .errors import (ConfigError, NormalizationError, PackagingError,
+                     PDFSegmentationError)
 from .logging import get_logger
-from .errors import (
-    ConfigError,
-    PDFSegmentationError,
-    NormalizationError,
-    PackagingError,
-)
 
 __all__ = [
     "get_config",

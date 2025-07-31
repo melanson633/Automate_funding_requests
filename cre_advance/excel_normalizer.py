@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Any, Dict, Iterable, Tuple
 
 import pandas as pd
 import yaml
@@ -71,6 +71,7 @@ def _apply_casts(df: pd.DataFrame) -> pd.DataFrame:
 def normalize(
     workbooks: Iterable[str] | str,
     cfg: dict,
+    metrics: Dict[str, Any] | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return normalized and raw DataFrames from Yardi workbooks.
 
@@ -93,6 +94,7 @@ def normalize(
         if isinstance(workbooks, str)
         else [Path(p) for p in workbooks]
     )
+    logger.info("Starting Excel normalization", extra={"context": "normalize"})
     excel_cfg = cfg.get("excel", {})
     header_row = int(excel_cfg.get("header_row", 4))
 
@@ -104,9 +106,14 @@ def normalize(
     target_fields = excel_cfg.get("fields", [])
 
     mapping = ai_gemini.map_schema(headers, samples, target_fields, cfg)
+    logger.debug("Initial mapping: %s", mapping, extra={"context": "normalize"})
     coverage = len(mapping) / len(headers) if headers else 0
+    if metrics is not None:
+        metrics["mapping_coverage"] = coverage
+        metrics["total_columns"] = len(headers)
     mapping_threshold = float(cfg.get("mapping_coverage_threshold", 0.6))
     if coverage < mapping_threshold or excel_cfg.get("force_schema_builder"):
+        logger.info("Generating schema via Gemini", extra={"context": "normalize"})
         proposal = ai_gemini.build_schema(headers, samples, cfg)
         mapping = proposal.get("mapping", {})
         if proposal:
@@ -122,12 +129,16 @@ def normalize(
                 with dest.open("w") as f:
                     yaml.safe_dump({"excel": proposal}, f)
                 logger.warning(
-                    "Low mapping coverage or schema builder forced. Saved inferred schema to %s. Review this file.",
+                    (
+                        "Low mapping coverage or schema builder forced. "
+                        "Saved inferred schema to %s. Review this file."
+                    ),
                     dest,
                 )
             else:
                 logger.warning(
-                    "Low mapping coverage or schema builder forced but auto_save_schemas is disabled."
+                    "Low mapping coverage or schema builder forced but "
+                    "auto_save_schemas is disabled."
                 )
 
     coverage = len(mapping) / len(headers) if headers else 0
@@ -142,6 +153,10 @@ def normalize(
     unmatched_threshold = float(cfg.get("unmatched_threshold", 0.4))
     if target_fields and len(missing) / len(target_fields) >= unmatched_threshold:
         raise NormalizationError("Too many columns unmapped")
+    if metrics is not None:
+        metrics["unmatched_columns"] = len(missing)
+        metrics["total_fields"] = len(target_fields)
 
     normalized = _apply_casts(normalized)
+    logger.info("Finished Excel normalization", extra={"context": "normalize"})
     return normalized, raw_df
