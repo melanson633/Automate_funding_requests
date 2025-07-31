@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """PDF segmentation utilities."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, List
-from concurrent.futures import ThreadPoolExecutor
 
 import pytesseract
 from PIL import Image
@@ -50,7 +50,7 @@ def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
     return manifest
 
 
-def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
+def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> bool:
     pdf_cfg = cfg.get("pdf", {})
     min_conf = float(pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0)))
     unmatched_threshold = float(
@@ -72,7 +72,8 @@ def _validate(manifest: List[dict], total_pages: int, cfg: dict) -> None:
         low_conf_pages / total_pages > unmatched_threshold
         or unmatched / total_pages > unmatched_threshold
     ):
-        raise PDFSegmentationError("PDF segmentation confidence too low")
+        return False
+    return True
 
 
 def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
@@ -101,5 +102,39 @@ def segment(pdf_path: str | Path, cfg: dict) -> List[dict]:
     else:
         manifest = _derive_ranges(manifest, len(reader.pages))
 
-    _validate(manifest, len(reader.pages), cfg)
+    if not _validate(manifest, len(reader.pages), cfg):
+        pdf_cfg = cfg.get("pdf", {})
+        if pdf_cfg.get("split_on_low_confidence"):
+            logger.warning(
+                "Low confidence manifest detected; splitting PDF into single pages"
+            )
+            min_conf = float(
+                pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0))
+            )
+            pages_covered: set[int] = set()
+            high_conf_manifest: List[dict] = []
+            for item in manifest:
+                start = int(item.get("start_page", 0))
+                end = int(item.get("end_page", start))
+                conf = float(item.get("confidence", 1.0))
+                if conf >= min_conf:
+                    high_conf_manifest.append(item)
+                    pages_covered.update(range(start, end + 1))
+            for page_num in range(1, len(reader.pages) + 1):
+                if page_num not in pages_covered:
+                    high_conf_manifest.append(
+                        {
+                            "start_page": page_num,
+                            "end_page": page_num,
+                            "vendor": "",
+                            "invoice_number": "",
+                            "date": "",
+                            "amount": "",
+                            "confidence": 0.0,
+                        }
+                    )
+            manifest = sorted(high_conf_manifest, key=lambda m: m["start_page"])
+        else:
+            raise PDFSegmentationError("PDF segmentation confidence too low")
+
     return manifest

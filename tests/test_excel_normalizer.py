@@ -4,9 +4,9 @@ import sys
 import tempfile
 import types
 from pathlib import Path
-import yaml
 
 import pandas as pd
+import yaml
 from openpyxl import Workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
@@ -118,3 +118,35 @@ def test_auto_save_schema(monkeypatch, tmp_path) -> None:
         data = yaml.safe_load(f)
     assert data["excel"]["mapping"]["Date"] == "InvoiceDate"
     files[0].unlink()
+
+
+def test_fuzzy_fallback(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        excel_path = Path(tmp) / "fuzzy.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Driver"
+        ws.append([])
+        ws.append([])
+        ws.append([])
+        ws.append(["Date", "Amt"])
+        ws.append(["2024-01-01", "100"])
+        wb.save(excel_path)
+
+        monkeypatch.setattr(
+            excel_normalizer.ai_gemini,
+            "map_schema",
+            lambda h, s, f, cfg=None: {},
+        )
+        monkeypatch.setattr(
+            excel_normalizer.ai_gemini, "build_schema", lambda h, s, cfg=None: {}
+        )
+
+        cfg = {
+            "lender": "x",
+            "excel": {"fields": ["Date", "Amount"], "fuzzy_ratio": 0.5},
+        }
+
+        normalized, _ = excel_normalizer.normalize([excel_path], cfg)
+
+        assert list(normalized.columns) == ["Date", "Amount"]
