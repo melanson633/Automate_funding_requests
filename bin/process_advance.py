@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from cre_advance import pipeline
 from cre_advance.utils import get_logger
@@ -33,6 +34,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf", required=True, help="PDF of invoices")
     parser.add_argument("--lender", required=True, help="Lender config key")
     parser.add_argument("--output", required=True, help="Output directory")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume using the latest staging files",
+    )
     return parser.parse_args()
 
 
@@ -52,6 +58,18 @@ def _print_summary(summary: dict) -> None:
 def main() -> None:
     args = _parse_args()
     logger = get_logger(__name__)
+    if args.resume:
+        staging = Path("data/staging")
+        norm_files = sorted(staging.glob("normalized_*.xlsx"))
+        manifest_files = sorted(staging.glob("manifest_*.json"))
+        if not norm_files or not manifest_files:
+            logger.error("No staging files found to resume")
+            sys.exit(1)
+        args.normalized = str(norm_files[-1])
+        args.manifest = str(manifest_files[-1])
+    else:
+        args.normalized = None
+        args.manifest = None
     try:
         summary = pipeline.run(args)
     except Exception as exc:  # noqa: BLE001
