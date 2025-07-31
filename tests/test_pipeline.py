@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 import pytest
+import json
 from cre_advance import pipeline  # noqa: E402
 
 
@@ -55,6 +56,9 @@ def test_run_orchestrates(monkeypatch):
         pdf="invoices.pdf",
         lender="l1",
         output="out",
+        resume=False,
+        normalized=None,
+        manifest=None,
     )
 
     summary = pipeline.run(args)
@@ -79,7 +83,9 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
     def fail_segment(pdf, cfg):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(pipeline, "pdf_segmenter", types.SimpleNamespace(segment=fail_segment))
+    monkeypatch.setattr(
+        pipeline, "pdf_segmenter", types.SimpleNamespace(segment=fail_segment)
+    )
 
     args = types.SimpleNamespace(
         excel="t.xlsx",
@@ -87,6 +93,9 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
         pdf="p.pdf",
         lender="l",
         output=tmp_path,
+        resume=False,
+        normalized=None,
+        manifest=None,
     )
 
     staging = Path("data/staging")
@@ -98,4 +107,51 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         pipeline.run(args)
 
-    assert (staging / "Driver_clean.xlsx").exists()
+    assert any(staging.glob("normalized_*.xlsx"))
+
+
+def test_resume_skips_ai(monkeypatch, tmp_path):
+    df = pd.DataFrame({"a": [1]})
+    manifest = ["m"]
+
+    staging = Path("data/staging")
+    staging.mkdir(parents=True, exist_ok=True)
+    norm_file = staging / "normalized_test.xlsx"
+    manifest_file = staging / "manifest_test.json"
+    df.to_excel(norm_file, index=False)
+    manifest_file.write_text(json.dumps(manifest))
+
+    called = {}
+
+    monkeypatch.setattr(pipeline, "get_config", lambda l: {})
+    monkeypatch.setattr(
+        pipeline,
+        "excel_normalizer",
+        types.SimpleNamespace(normalize=lambda y, c: called.setdefault("norm", True)),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "pdf_segmenter",
+        types.SimpleNamespace(segment=lambda p, c: called.setdefault("seg", True)),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "file_packager",
+        types.SimpleNamespace(package=lambda *a, **k: {"excel": "x"}),
+    )
+
+    args = types.SimpleNamespace(
+        excel="t.xlsx",
+        yardi=["y.xlsx"],
+        pdf="p.pdf",
+        lender="l",
+        output=tmp_path,
+        resume=True,
+        normalized=str(norm_file),
+        manifest=str(manifest_file),
+    )
+
+    summary = pipeline.run(args)
+
+    assert "norm" not in called and "seg" not in called
+    assert summary["excel"] == "x"
