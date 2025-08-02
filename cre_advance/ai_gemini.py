@@ -182,6 +182,70 @@ def map_schema(
     return result or {}
 
 
+def classify_pages(
+    pages: List[str], cfg: Dict[str, Any] | None = None
+) -> List[Dict[str, Any]]:
+    """Classify PDF pages and decide which to keep.
+
+    Args:
+        pages: OCR or extracted text for each PDF page.
+        cfg: Optional configuration dictionary.
+
+    Returns:
+        A list of dictionaries describing each page with keys
+        ``page_number`` (1-indexed), ``category`` (``invoice``,
+        ``invoice_register``, ``email_approval`` or ``unknown``), ``keep``
+        (``True`` for invoice pages only) and ``confidence`` (0–1).
+    """
+
+    cfg = cfg or {}
+    joined_pages = "\n---\n".join(pages)
+    prompt = (
+        "For each page of a PDF invoice backup, decide whether the page should be "
+        "kept. A 'keep' page is an actual invoice. An 'invoice' page has: vendor "
+        "logo/name; words like 'Invoice' or 'Invoice #'; date; 'Bill To' sections; "
+        "line-item tables; and totals such as 'Total' or 'Balance Due'. A page "
+        "labeled 'Invoice Register' with batch/contract fields and a 'Workflow "
+        "Approval' table should be removed. A page containing email headers ('From:', "
+        "'Sent:', 'To:', 'Subject:', 'Date:') followed by conversational text, "
+        "signature blocks and confidentiality notices should also be removed. "
+        "Return a JSON array of objects with keys: page_number (integer, 1-indexed), "
+        "category ('invoice', 'invoice_register', 'email_approval' or 'unknown'), "
+        "keep (boolean), and confidence (number). Page texts (separated by ---):\n"
+        + joined_pages
+    )
+
+    schema = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "page_number": {"type": "integer"},
+                "category": {
+                    "type": "string",
+                    "enum": [
+                        "invoice",
+                        "invoice_register",
+                        "email_approval",
+                        "unknown",
+                    ],
+                },
+                "keep": {"type": "boolean"},
+                "confidence": {"type": "number"},
+            },
+            "required": ["page_number", "category", "keep"],
+        },
+    }
+
+    result = _request_json(
+        prompt,
+        schema,
+        cfg,
+        temperature=cfg.get("gemini_temperature", 0.2),
+    )
+    return result or []
+
+
 def segment_pdf(
     pages: List[str], cfg: Dict[str, Any] | None = None
 ) -> List[Dict[str, Any]]:

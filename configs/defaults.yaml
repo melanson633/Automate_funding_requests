@@ -12,3 +12,6 @@ packager:
   vendor_ratio_threshold: 0.8
   amount_tolerance: 0.01
   score_threshold: 2.0
+pdf:
+  remove_invoice_register: true
+  classification_confidence_threshold: 0.5

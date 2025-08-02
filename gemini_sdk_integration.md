@@ -21,6 +21,12 @@
 | src/cli.py | CLI |
 | config/*.yaml | Model settings |
 
+# Page classification
+
+`ai_gemini.classify_pages()` sends each page's OCR text to Gemini and returns
+labels such as `invoice`, `invoice_register`, or `email_approval`. Only pages
+with `keep: true` are fed into downstream segmentation.
+
 # Gemini SDK Cheat‑Sheet (v 1.27.0, retrieved 2025-07-29)
 
 | Area | Minimal Call | Key Args / Patterns | Notes |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List
 
 import pytesseract
 from PIL import Image
@@ -82,17 +82,98 @@ def _validate(
     return True
 
 
+def _heuristic_classify(pages: List[str]) -> List[dict]:
+    """Heuristically classify pages without Gemini."""
+    results: List[dict] = []
+    for idx, text in enumerate(pages, start=1):
+        lower = text.lower()
+        if "invoice register" in lower and "workflow approval" in lower:
+            results.append(
+                {
+                    "page_number": idx,
+                    "category": "invoice_register",
+                    "keep": False,
+                    "confidence": 1.0,
+                }
+            )
+        elif "from:" in lower and ("sent:" in lower or "subject:" in lower):
+            results.append(
+                {
+                    "page_number": idx,
+                    "category": "email_approval",
+                    "keep": False,
+                    "confidence": 1.0,
+                }
+            )
+        else:
+            results.append(
+                {
+                    "page_number": idx,
+                    "category": "unknown",
+                    "keep": True,
+                    "confidence": 1.0,
+                }
+            )
+    return results
+
+
 def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> List[dict]:
     """Return invoice manifest with page ranges for ``pdf_path``."""
     logger.info("Starting PDF segmentation", extra={"context": "segment"})
     reader = PdfReader(str(pdf_path))
     ocr_cfg = cfg.get("ocr", {})
     with ThreadPoolExecutor() as ex:
-        texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+        all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+
+    pdf_cfg = cfg.get("pdf", {})
+    page_map = list(range(1, len(all_texts) + 1))
+    texts = all_texts
+
+    if pdf_cfg.get("remove_invoice_register", True):
+        classified: List[dict] | None = None
+        try:
+            classified = ai_gemini.classify_pages(all_texts, cfg)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Gemini page classification failed: %s", exc, extra={"context": "segment"}
+            )
+        if not classified:
+            logger.info(
+                "Falling back to heuristic page classification",
+                extra={"context": "segment"},
+            )
+            classified = _heuristic_classify(all_texts)
+        if not classified:
+            raise PDFSegmentationError("Page classification failed")
+
+        threshold = float(pdf_cfg.get("classification_confidence_threshold", 0.0))
+        removed: Dict[str, int] = {}
+        keep_pages: List[int] = []
+        by_number = {int(c.get("page_number", 0)): c for c in classified}
+        for num in range(1, len(all_texts) + 1):
+            cls = by_number.get(num, {"keep": True, "category": "unknown", "confidence": 1.0})
+            keep = bool(cls.get("keep"))
+            conf = float(cls.get("confidence", 0.0))
+            if keep and conf >= threshold:
+                keep_pages.append(num)
+            else:
+                cat = str(cls.get("category", "unknown"))
+                removed[cat] = removed.get(cat, 0) + 1
+        if removed:
+            logger.info(
+                "Removed %s pages: %s",
+                sum(removed.values()),
+                removed,
+                extra={"context": "segment"},
+            )
+        texts = [all_texts[i - 1] for i in keep_pages]
+        page_map = keep_pages
+        if not texts:
+            raise PDFSegmentationError("No invoice pages after classification")
 
     manifest = ai_gemini.segment_pdf(texts, cfg)
     if metrics is not None:
-        metrics["total_pages"] = len(reader.pages)
+        metrics["total_pages"] = len(page_map)
 
     if not manifest:
         logger.warning(
@@ -101,23 +182,28 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
         )
         manifest = [
             {
-                "start_page": i + 1,
-                "end_page": i + 1,
+                "start_page": p,
+                "end_page": p,
                 "vendor": "",
                 "invoice_number": "",
                 "date": "",
                 "amount": "",
                 "confidence": 1.0,
             }
-            for i in range(len(reader.pages))
+            for p in page_map
         ]
     else:
-        manifest = _derive_ranges(manifest, len(reader.pages))
+        manifest = _derive_ranges(manifest, len(page_map))
+        for item in manifest:
+            start_idx = int(item.get("start_page", 1)) - 1
+            end_idx = int(item.get("end_page", start_idx + 1)) - 1
+            item["start_page"] = page_map[start_idx]
+            item["end_page"] = page_map[end_idx]
 
     if metrics is not None:
         metrics["invoice_count"] = len(manifest)
 
-    if not _validate(manifest, len(reader.pages), cfg, metrics):
+    if not _validate(manifest, len(page_map), cfg, metrics):
         pdf_cfg = cfg.get("pdf", {})
         if pdf_cfg.get("split_on_low_confidence"):
             logger.warning(
@@ -136,7 +222,7 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
                 if conf >= min_conf:
                     high_conf_manifest.append(item)
                     pages_covered.update(range(start, end + 1))
-            for page_num in range(1, len(reader.pages) + 1):
+            for page_num in page_map:
                 if page_num not in pages_covered:
                     high_conf_manifest.append(
                         {

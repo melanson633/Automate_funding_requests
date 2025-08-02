@@ -88,6 +88,8 @@ Development Notes
 	•	Configuration files for lender-specific adjustments should be placed in configs/lenders/.
 	•	Utilize Cursor IDE with predefined rules in .cursor/config.json for intelligent development assistance.
 
+        •       Page filtering options: set `pdf.remove_invoice_register` to disable dropping of "Invoice Register" and email approval pages, and adjust confidence via `pdf.classification_confidence_threshold`.
+
 Running Tests
     Execute the unit tests and style checks before committing:
     ```bash
