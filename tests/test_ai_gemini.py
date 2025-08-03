@@ -8,7 +8,17 @@ import pytest
 import google.api_core  # noqa: F401
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.modules.setdefault("google.generativeai", types.ModuleType("generativeai"))
+
+# Mock the genai module structure
+google_mock = types.ModuleType("google")
+genai_mock = types.ModuleType("genai")
+genai_types_mock = types.ModuleType("types")
+genai_mock.types = genai_types_mock
+google_mock.genai = genai_mock
+
+sys.modules.setdefault("google", google_mock)
+sys.modules.setdefault("google.genai", genai_mock)
+sys.modules.setdefault("google.genai.types", genai_types_mock)
 
 from cre_advance import ai_gemini  # noqa: E402
 

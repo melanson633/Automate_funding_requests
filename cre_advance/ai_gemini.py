@@ -13,7 +13,8 @@ import os
 import time
 from typing import Any, Dict, List
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import requests
 from google.api_core import exceptions as google_exceptions
 
@@ -25,29 +26,21 @@ _MODEL_NAME = "gemini-1.5-flash"
 _MAX_RETRIES = 3
 
 _client = None
-_client_model = None
-
-
-def _init_client(cfg: Dict[str, Any] | None = None):
-    """Initialize Gemini client with API key."""
-    cfg = cfg or {}
-    model_name = cfg.get("gemini_model", _MODEL_NAME)
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "GOOGLE_API_KEY not set. Create a .env file with your API key and retry."
-        )
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
 
 
 def _get_client(cfg: Dict[str, Any] | None = None):
-    global _client, _client_model
+    """Get or create Gemini client instance."""
+    global _client
     cfg = cfg or {}
-    model_name = cfg.get("gemini_model", _MODEL_NAME)
-    if _client is None or _client_model != model_name:
-        _client = _init_client(cfg)
-        _client_model = model_name
+    
+    if _client is None:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GOOGLE_API_KEY not set. Create a .env file with your API key and retry."
+            )
+        _client = genai.Client(api_key=api_key)
+    
     return _client
 
 
@@ -63,19 +56,19 @@ def _request_json(
     validation or parsing failures are logged and raised without retrying.
     """
     cfg = cfg or {}
-    model = _get_client(cfg)
+    client = _get_client(cfg)
+    model_name = cfg.get("gemini_model", _MODEL_NAME)
 
     temp = (
         temperature if temperature is not None else cfg.get("gemini_temperature", 0.2)
     )
 
-    # Add JSON instruction to prompt for older SDK
-    json_prompt = f"{prompt}\n\nPlease respond with valid JSON only."
-
-    # Configure generation parameters for older SDK
-    generation_config = genai.types.GenerationConfig(
+    # Configure generation parameters for new SDK
+    generation_config = types.GenerateContentConfig(
         temperature=temp,
         max_output_tokens=2048,
+        response_mime_type="application/json",
+        response_schema=schema,
     )
 
     delay = 1.0
@@ -83,10 +76,11 @@ def _request_json(
     last_exc: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            logger.debug("Gemini prompt: %s", json_prompt)
-            resp = model.generate_content(
-                json_prompt,
-                generation_config=generation_config,
+            logger.debug("Gemini prompt: %s", prompt)
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=generation_config,
             )
             logger.debug("Gemini raw response: %s", resp.text)
 
@@ -94,6 +88,7 @@ def _request_json(
                 logger.warning("Empty response from Gemini")
                 return None
 
+            # New SDK should return clean JSON, but handle legacy format just in case
             text = resp.text.strip()
             if text.startswith("```json"):
                 text = text[7:]
@@ -108,7 +103,7 @@ def _request_json(
             raise
         except google_exceptions.BadRequest as exc:
             logger.error("Gemini bad request: %s", exc)
-            logger.error("Prompt: %s", json_prompt)
+            logger.error("Prompt: %s", prompt)
             logger.error("Temperature: %s", temp)
             raise
         except (
@@ -148,7 +143,7 @@ def _request_json(
     logger.error(
         "Gemini request failed after %s attempts. Prompt: %s | temperature=%s | model=%s",
         max_retries,
-        json_prompt,
+        prompt,
         temp,
         cfg.get("gemini_model", _MODEL_NAME),
     )

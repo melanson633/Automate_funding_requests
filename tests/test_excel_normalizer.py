@@ -10,10 +10,17 @@ import yaml
 from openpyxl import Workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
-sys.modules.setdefault("google", types.ModuleType("google"))  # noqa: E402
-genai_stub = types.ModuleType("generativeai")
-genai_stub.types = types.SimpleNamespace()
-sys.modules.setdefault("google.generativeai", genai_stub)  # noqa: E402
+
+# Mock the genai module structure
+google_mock = types.ModuleType("google")
+genai_mock = types.ModuleType("genai")
+genai_types_mock = types.ModuleType("types")
+genai_mock.types = genai_types_mock
+google_mock.genai = genai_mock
+
+sys.modules.setdefault("google", google_mock)
+sys.modules.setdefault("google.genai", genai_mock)
+sys.modules.setdefault("google.genai.types", genai_types_mock)
 from cre_advance import excel_normalizer  # noqa: E402
 
 
