@@ -49,12 +49,13 @@ Automate_funding_requests/
 | **utils/errors.py**                    | Custom error classes                                                                                                | `ConfigError`, `PDFSegmentationError`, etc.                     |
 | **ai_gemini.py**                       | Thin wrapper over Gemini SDK; prompt templates; retries                                                            | `map_schema`, `segment_pdf`, `extract_metadata`, `build_schema`  |
 | **excel_normalizer.py**                | Detect header row (defaulting to row 4 of the **Driver** tab), call `map_schema`, clean + cast data, write tabs    | `normalize(path, config)`                                       |
-| **pdf_segmenter.py**                   | Extract text/OCR, call `segment_pdf`, derive page ranges                                                            | `segment(pdf_path, config)`                                     |
+| **pdf_segmenter.py**                   | Extract text/OCR, classify pages, call `segment_pdf`, derive page ranges                                                            | `segment(pdf_path, config)`                                     |
 | **file_packager.py**                   | Match invoices, rebuild PDF, write Invoice Log, output Excel & JSON report                                         | `package(normalized_df, manifest, template_xlsx)`               |
 | **pipeline.py**                        | Wire everything; enforce error‑rate threshold                                                                        | `run(args)`                                                     |
 | **bin/process_advance.py**             | CLI argument parsing & pretty output                                                                                | –                                                                |
 | **future_development/orchestrator.py**  | Placeholder for future orchestration capabilities (e.g., Gemini‑powered assistants)                                 | `suggest_next_action` (stub)                                     |
 
+> **Update:** `pdf_segmenter` now drops email approvals and "Invoice Register" pages before segmentation.
 *Note:* The canonical column schema for the Invoice Log is derived by default from row 4 of the **Driver** tab in the Funding Request template (Driver sheet). This can be overridden via lender‑specific YAML files in `configs/lenders/` fileciteturn0file0.
 
 ---
