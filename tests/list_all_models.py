@@ -52,7 +52,7 @@ def list_all_available_models():
         model_families = {}
         
         for model in models_sorted:
-            # Extract model family (e.g., "gemini-2.5" from "models/gemini-2.5-flash")
+            # Extract model family (e.g., "gemini-2.5" from "models/gemini-2.5-pro")
             model_name = model.name.replace("models/", "")
             
             # Skip non-generative models
@@ -102,7 +102,7 @@ def list_all_available_models():
         print(f"\n🧪 TESTING PROMISING MODELS:")
         print("=" * 40)
         
-        test_models = [name for name in all_model_names if any(x in name for x in ['2.5-flash', '2.5-pro', '2.0-flash'])]
+        test_models = [name for name in all_model_names if any(x in name for x in ['2.5-pro', '2.0-flash'])]
         
         for model_name in test_models[:5]:  # Test up to 5 models
             try:

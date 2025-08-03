@@ -22,7 +22,7 @@ from .utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_MODEL_NAME = "gemini-1.5-flash"
+_MODEL_NAME = "gemini-2.5-pro"
 _MAX_RETRIES = 3
 
 _client = None
@@ -60,7 +60,7 @@ def _request_json(
     model_name = cfg.get("gemini_model", _MODEL_NAME)
 
     temp = (
-        temperature if temperature is not None else cfg.get("gemini_temperature", 0.2)
+        temperature if temperature is not None else cfg.get("gemini_temperature", 0.1)
     )
 
     # Configure generation parameters for new SDK
@@ -237,7 +237,7 @@ def classify_pages(
         prompt,
         schema,
         cfg,
-        temperature=cfg.get("gemini_temperature", 0.2),
+        temperature=cfg.get("gemini_temperature", 0.1),
     )
     return result or []
 
@@ -276,7 +276,7 @@ def segment_pdf(
         prompt,
         schema,
         cfg,
-        temperature=cfg.get("gemini_temperature", 0.2),
+        temperature=cfg.get("gemini_temperature", 0.1),
     )
     return result or []
 

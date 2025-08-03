@@ -19,7 +19,7 @@ def test_run_orchestrates(monkeypatch):
         called["config"] = lender
         return {}
 
-    def fake_normalize(yardi, cfg, metrics=None):
+    def fake_normalize(yardi, cfg, metrics=None, template_path=None):
         called["normalize"] = list(yardi)
         df = pd.DataFrame({"a": [1]})
         return df, df
@@ -77,7 +77,7 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
     monkeypatch.setattr(
         pipeline,
         "excel_normalizer",
-        types.SimpleNamespace(normalize=lambda y, c, metrics=None: (df, df)),
+        types.SimpleNamespace(normalize=lambda y, c, metrics=None, template_path=None: (df, df)),
     )
 
     def fail_segment(pdf, cfg, metrics=None):
@@ -128,7 +128,7 @@ def test_resume_skips_ai(monkeypatch, tmp_path):
         pipeline,
         "excel_normalizer",
         types.SimpleNamespace(
-            normalize=lambda y, c, metrics=None: called.setdefault("norm", True)
+            normalize=lambda y, c, metrics=None, template_path=None: called.setdefault("norm", True)
         ),
     )
     monkeypatch.setattr(
