@@ -64,12 +64,14 @@ def _request_json(
     )
 
     # Configure generation parameters for new SDK
-    generation_config = types.GenerateContentConfig(
-        temperature=temp,
-        max_output_tokens=2048,
-        response_mime_type="application/json",
-        response_schema=schema,
-    )
+    config_params = {
+        "temperature": temp,
+        "max_output_tokens": 2048,
+        "response_mime_type": "application/json",
+    }
+    if schema is not None:
+        config_params["response_schema"] = schema
+    generation_config = types.GenerateContentConfig(**config_params)
 
     delay = 1.0
     max_retries = int(cfg.get("gemini_max_retries", _MAX_RETRIES))
@@ -165,12 +167,11 @@ def map_schema(
     )
     prompt += f"\nTarget fields: {', '.join(target_fields)}"
     prompt += f"\nHeaders: {', '.join(headers)}"
-    prompt += "\nSample rows:" + json.dumps(sample_rows, indent=2)
+    prompt += "\nSample rows:" + json.dumps(sample_rows, indent=2, default=str)
 
-    schema = {"type": "object", "additionalProperties": {"type": "string"}}
     result = _request_json(
         prompt,
-        schema,
+        None,  # No schema validation, just JSON output
         cfg,
         temperature=cfg.get("gemini_temperature", 0.1),
     )
@@ -319,18 +320,11 @@ def build_schema(
         "'mapping' (object mapping each raw header to a canonical name)."
     )
     prompt += f"\nHeaders: {', '.join(headers)}"
-    prompt += "\nSample rows:" + json.dumps(sample_rows, indent=2)
+    prompt += "\nSample rows:" + json.dumps(sample_rows, indent=2, default=str)
 
-    schema = {
-        "type": "object",
-        "properties": {
-            "fields": {"type": "array", "items": {"type": "string"}},
-            "mapping": {"type": "object", "additionalProperties": {"type": "string"}},
-        },
-    }
     result = _request_json(
         prompt,
-        schema,
+        None,  # No schema validation, just JSON output
         cfg,
         temperature=cfg.get("gemini_temperature", 0.1),
     )

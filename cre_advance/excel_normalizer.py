@@ -109,7 +109,15 @@ def normalize(
     samples = raw_df.head(5).to_dict(orient="records")
     target_fields = excel_cfg.get("fields", [])
 
+    # Try AI mapping first, fallback to manual mapping if it fails
+    manual_mapping = excel_cfg.get("manual_mapping", {})
     mapping = ai_gemini.map_schema(headers, samples, target_fields, cfg)
+    
+    # If AI mapping failed, use manual mapping
+    if not mapping and manual_mapping:
+        logger.info("AI mapping failed, using manual mapping", extra={"context": "normalize"})
+        mapping = {k: v for k, v in manual_mapping.items() if k in headers}
+    
     logger.debug("Initial mapping: %s", mapping, extra={"context": "normalize"})
     coverage = len(mapping) / len(headers) if headers else 0
     if metrics is not None:
@@ -173,10 +181,19 @@ def normalize(
             template_cfg.get("header_row", 6)
         )
         
-        if not template_df.empty and "invoice_number" in normalized.columns and "vendor" in normalized.columns:
+        # Apply template column mapping if provided
+        template_column_mapping = template_cfg.get("column_mapping", {})
+        if template_column_mapping:
+            template_df = template_df.rename(columns=template_column_mapping)
+        
+        # Check for both old and new column names for compatibility
+        vendor_col = "vendor_name" if "vendor_name" in normalized.columns else "vendor"
+        invoice_col = "invoice_number"
+        
+        if not template_df.empty and invoice_col in normalized.columns and vendor_col in normalized.columns:
             # Create composite key for exact matching
-            normalized["_key"] = normalized["invoice_number"].astype(str).str.strip() + "|" + normalized["vendor"].astype(str).str.strip()
-            template_df["_key"] = template_df["invoice_number"].astype(str).str.strip() + "|" + template_df["vendor"].astype(str).str.strip()
+            normalized["_key"] = normalized[invoice_col].astype(str).str.strip() + "|" + normalized[vendor_col].astype(str).str.strip()
+            template_df["_key"] = template_df[invoice_col].astype(str).str.strip() + "|" + template_df[vendor_col].astype(str).str.strip()
             
             # Capture excluded invoices before filtering
             excluded_invoices = normalized[normalized["_key"].isin(template_df["_key"])]
@@ -190,9 +207,9 @@ def normalize(
                 logger.info(f"Filtered {filtered_count} previously funded invoices", extra={"context": "normalize"})
                 if metrics is not None:
                     metrics["filtered_invoices"] = filtered_count
-                    excluded_data = excluded_invoices[["invoice_number", "vendor", "amount"]].to_dict("records")
+                    excluded_data = excluded_invoices[["invoice_number", vendor_col, "amount"]].to_dict("records")
                     metrics["excluded_invoices"] = excluded_data
-                    excluded_summary = [f"{item['invoice_number']}|{item['vendor']}|${item['amount']}" for item in excluded_data]
+                    excluded_summary = [f"{item['invoice_number']}|{item[vendor_col]}|${item['amount']}" for item in excluded_data]
                     logger.info(f"Excluded invoice details: {excluded_summary}", extra={"context": "normalize"})
     
     logger.info("Finished Excel normalization", extra={"context": "normalize"})

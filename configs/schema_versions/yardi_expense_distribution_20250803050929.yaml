@@ -1,0 +1,27 @@
+excel:
+  fields:
+  - property_name
+  - job_name
+  - vendor_name
+  - category_description
+  - amount
+  - invoice_number
+  - invoice_date
+  - control_number
+  - accounting_period_date
+  - expense_account_number
+  - retention_amount
+  - remarks
+  mapping:
+    Amount: amount
+    Category: category_description
+    Company (Vendor Code): vendor_name
+    Control: control_number
+    Expense Account: expense_account_number
+    'Invoice #': invoice_number
+    Invoice Date: invoice_date
+    Job: job_name
+    Period: accounting_period_date
+    Property: property_name
+    Remarks: remarks
+    Retention Amount: retention_amount
