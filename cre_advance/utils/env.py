@@ -74,7 +74,8 @@ def get_config(lender: str) -> dict:
         with defaults_path.open("r") as f:
             config = yaml.safe_load(f) or {}
     except FileNotFoundError as exc:
-        raise ConfigError(f"Default config not found: {defaults_path}") from exc
+        msg = f"Default config not found: {defaults_path}"
+        raise ConfigError(msg) from exc
 
     lender_path = project_root / "configs" / "lenders" / f"{lender}.yaml"
     if lender_path.is_file():
@@ -84,13 +85,25 @@ def get_config(lender: str) -> dict:
     else:
         raise ConfigError(f"Lender config not found: {lender_path}")
 
+    # Environment variables take precedence over YAML values
+    env_model_tier = os.getenv("MODEL_TIER")
+    env_gemini_model = os.getenv("GEMINI_MODEL")
+    if env_model_tier:
+        config["model_tier"] = env_model_tier.lower()
+    if env_gemini_model:
+        config["gemini_model"] = env_gemini_model
+
     model_tier = config.get("model_tier")
-    if model_tier is not None:
+    gemini_model = config.get("gemini_model")
+
+    if model_tier:
         if model_tier not in _MODEL_TIERS:
             raise ConfigError("'model_tier' must be one of {'flash', 'pro'}")
-        config["gemini_model"] = f"gemini-2.5-{model_tier}"
-    elif "gemini_model" not in config:
-        raise ConfigError("Either 'model_tier' or 'gemini_model' must be provided")
+        gemini_model = f"gemini-2.5-{model_tier}"
+    elif not gemini_model:
+        gemini_model = "gemini-2.5-pro"
+
+    config["gemini_model"] = gemini_model
 
     for key in _REQUIRED_KEYS:
         if key not in config:
