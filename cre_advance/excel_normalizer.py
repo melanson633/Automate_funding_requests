@@ -39,11 +39,11 @@ def _fuzzy_match(
     return mapping
 
 
-def _read_workbook(path: Path, header_row: int) -> pd.DataFrame:
-    """Return DataFrame from the Driver sheet using ``header_row``."""
+def _read_workbook(path: Path, sheet_name: str, header_row: int) -> pd.DataFrame:
+    """Return DataFrame from the specified sheet using ``header_row``."""
     df = pd.read_excel(
         path,
-        sheet_name="Driver",
+        sheet_name=sheet_name,
         header=None,
         engine="openpyxl",
     )
@@ -72,6 +72,7 @@ def normalize(
     workbooks: Iterable[str] | str,
     cfg: dict,
     metrics: Dict[str, Any] | None = None,
+    template_path: str | Path | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return normalized and raw DataFrames from Yardi workbooks.
 
@@ -97,9 +98,12 @@ def normalize(
     logger.info("Starting Excel normalization", extra={"context": "normalize"})
     excel_cfg = cfg.get("excel", {})
     header_row = int(excel_cfg.get("header_row", 4))
+    sheet_name = excel_cfg.get("sheet_name", "Driver")
 
-    frames = [_read_workbook(p, header_row) for p in wb_paths]
+    frames = [_read_workbook(p, sheet_name, header_row) for p in wb_paths]
     raw_df = pd.concat(frames, ignore_index=True)
+
+
 
     headers = list(raw_df.columns)
     samples = raw_df.head(5).to_dict(orient="records")
@@ -158,5 +162,38 @@ def normalize(
         metrics["total_fields"] = len(target_fields)
 
     normalized = _apply_casts(normalized)
+    
+    # Filter previously funded invoices if template provided (after normalization)
+    if template_path and cfg.get("filter_funded", True):
+        logger.info("Filtering previously funded invoices", extra={"context": "normalize"})
+        template_cfg = cfg.get("template", {})
+        template_df = _read_workbook(
+            Path(template_path), 
+            template_cfg.get("sheet_name", "INVOICES"),
+            template_cfg.get("header_row", 6)
+        )
+        
+        if not template_df.empty and "invoice_number" in normalized.columns and "vendor" in normalized.columns:
+            # Create composite key for exact matching
+            normalized["_key"] = normalized["invoice_number"].astype(str).str.strip() + "|" + normalized["vendor"].astype(str).str.strip()
+            template_df["_key"] = template_df["invoice_number"].astype(str).str.strip() + "|" + template_df["vendor"].astype(str).str.strip()
+            
+            # Capture excluded invoices before filtering
+            excluded_invoices = normalized[normalized["_key"].isin(template_df["_key"])]
+            
+            # Filter using pandas set operations (super fast!)
+            before_count = len(normalized)
+            normalized = normalized[~normalized["_key"].isin(template_df["_key"])].drop("_key", axis=1)
+            filtered_count = before_count - len(normalized)
+            
+            if filtered_count > 0:
+                logger.info(f"Filtered {filtered_count} previously funded invoices", extra={"context": "normalize"})
+                if metrics is not None:
+                    metrics["filtered_invoices"] = filtered_count
+                    excluded_data = excluded_invoices[["invoice_number", "vendor", "amount"]].to_dict("records")
+                    metrics["excluded_invoices"] = excluded_data
+                    excluded_summary = [f"{item['invoice_number']}|{item['vendor']}|${item['amount']}" for item in excluded_data]
+                    logger.info(f"Excluded invoice details: {excluded_summary}", extra={"context": "normalize"})
+    
     logger.info("Finished Excel normalization", extra={"context": "normalize"})
     return normalized, raw_df

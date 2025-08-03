@@ -62,7 +62,7 @@ def run(args: Namespace) -> Dict[str, Any]:
             logger.info("Normalizing Excel workbooks", extra={"context": "normalize"})
             t0 = time.perf_counter()
             normalized_df, _ = excel_normalizer.normalize(
-                args.yardi, cfg, metrics=metrics
+                args.yardi, cfg, metrics=metrics, template_path=args.excel
             )
             metrics["excel_seconds"] = time.perf_counter() - t0
             norm_path = staging_dir / f"normalized_{timestamp}.xlsx"

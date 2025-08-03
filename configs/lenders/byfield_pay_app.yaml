@@ -1,0 +1,21 @@
+lender: "byfield_pay_app"
+logging:
+  level: INFO
+
+filter_funded: true
+
+excel:
+  sheet_name: "INVOICES"
+  header_row: 6
+  fields:
+    - "vendor"
+    - "invoice_number"
+    - "date"
+    - "amount"
+    - "description"
+    - "line_item"
+    - "cost_code"
+
+template:
+  sheet_name: "INVOICES"
+  header_row: 6

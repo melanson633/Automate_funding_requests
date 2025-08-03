@@ -1,0 +1,22 @@
+lender: "yardi_expense_distribution"
+logging:
+  level: INFO
+
+filter_funded: true
+
+excel:
+  sheet_name: "Expense Distribution Report"
+  header_row: 3
+  fields:
+    - "vendor"
+    - "invoice_number"
+    - "date"
+    - "amount"
+    - "description"
+    - "property"
+    - "account_code"
+    - "gl_account"
+
+template:
+  sheet_name: "INVOICES"
+  header_row: 6

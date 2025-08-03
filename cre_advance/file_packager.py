@@ -31,6 +31,18 @@ def _detect_duplicates(df: pd.DataFrame, manifest: List[dict]) -> dict:
     return {"excel": dup_excel, "pdf": dup_pdf}
 
 
+def _write_exclusion_report(wb, excluded_data: List[dict]) -> None:
+    """Create Exclusion Report sheet as first visible sheet."""
+    if excluded_data:
+        if "Exclusion Report" in wb.sheetnames:
+            del wb["Exclusion Report"]
+        ws = wb.create_sheet("Exclusion Report", 0)  # First sheet
+        ws.append(["Invoice Number", "Vendor", "Amount", "Exclusion Reason", "Action Required"])
+        for item in excluded_data:
+            ws.append([item["invoice_number"], item["vendor"], f"${item['amount']:.2f}", 
+                      "Previously funded in template", "Review if partial payment due"])
+
+
 def _match_invoices(
     df: pd.DataFrame, manifest: List[dict], cfg: dict | None = None
 ) -> tuple[List[dict], list[int], list[int]]:
@@ -110,6 +122,7 @@ def _write_excel(
     template: Path,
     dest: Path,
     status: List[str] | None = None,
+    metrics: dict | None = None,
 ) -> None:
     """Create workbook with hidden Driver and Invoice Log and match status."""
     wb = load_workbook(template)
@@ -139,6 +152,7 @@ def _write_excel(
             wb["Match Status"].append([s])
         wb["Match Status"].sheet_state = "hidden"
 
+    _write_exclusion_report(wb, metrics.get("excluded_invoices", []) if metrics else [])
     wb.save(dest)
 
 
@@ -185,7 +199,7 @@ def package(
         "matched" if idx not in unmatched_rows else "unmatched"
         for idx in range(len(normalized_df.index))
     ]
-    _write_excel(normalized_df, ordered_df, Path(template_path), excel_out, status)
+    _write_excel(normalized_df, ordered_df, Path(template_path), excel_out, status, metrics)
 
     dups = _detect_duplicates(normalized_df, manifest)
 
@@ -205,6 +219,9 @@ def package(
         "output_pdf": str(pdf_out),
         "duplicate_excel_invoices": dups["excel"],
         "duplicate_pdf_invoices": dups["pdf"],
+        "excluded_invoices": metrics.get("excluded_invoices", []) if metrics else [],
+        "exclusion_count": len(metrics.get("excluded_invoices", [])) if metrics else 0,
+        "exclusion_summary": f"Excluded {len(metrics.get('excluded_invoices', []))} previously funded invoices" if metrics else "No exclusions applied",
         "warning": warning,
         "metrics": metrics or {},
     }
