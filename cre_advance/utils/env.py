@@ -33,6 +33,8 @@ _REQUIRED_KEYS = [
     "gemini_max_retries",
 ]
 
+_MODEL_TIERS = {"flash", "pro"}
+
 
 def _merge_dicts(base: dict, overrides: dict) -> dict:
     """Recursively merge two dictionaries."""
@@ -81,6 +83,14 @@ def get_config(lender: str) -> dict:
         config = _merge_dicts(config, lender_cfg)
     else:
         raise ConfigError(f"Lender config not found: {lender_path}")
+
+    model_tier = config.get("model_tier")
+    if model_tier is not None:
+        if model_tier not in _MODEL_TIERS:
+            raise ConfigError("'model_tier' must be one of {'flash', 'pro'}")
+        config["gemini_model"] = f"gemini-2.5-{model_tier}"
+    elif "gemini_model" not in config:
+        raise ConfigError("Either 'model_tier' or 'gemini_model' must be provided")
 
     for key in _REQUIRED_KEYS:
         if key not in config:

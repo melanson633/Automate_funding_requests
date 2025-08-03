@@ -4,7 +4,7 @@ logging:
 mapping_coverage_threshold: 0.6
 unmatched_threshold: 0.4
 min_confidence: 0.0
-gemini_model: gemini-2.5-pro
+model_tier: pro
 gemini_temperature: 0.1
 gemini_max_retries: 3
 auto_save_schemas: true
