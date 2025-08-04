@@ -15,6 +15,9 @@ packager:
 pdf:
   remove_invoice_register: true
   classification_confidence_threshold: 0.5
+  use_vision: false  # toggles the Gemini Vision path
+  vision_model: "gemini-2.5-pro"  # allows overriding the model name
+  max_pages_per_request: 3000  # number of pages batched per request
 ocr:
   langs: eng
   psm: 6
