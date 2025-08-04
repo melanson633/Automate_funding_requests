@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List
+import copy
 
 import pytesseract
 from PIL import Image
@@ -90,7 +91,7 @@ def _finalize(
     cfg: dict,
     metrics: dict | None = None,
 ) -> List[dict]:
-    """Finalize manifest and run validation."""
+    """Finalize manifest with proper page numbers."""
     if metrics is not None:
         metrics["total_pages"] = len(page_map)
 
@@ -123,43 +124,6 @@ def _finalize(
     if metrics is not None:
         metrics["invoice_count"] = len(manifest)
 
-    if not _validate(manifest, len(page_map), cfg, metrics):
-        pdf_cfg = cfg.get("pdf", {})
-        if pdf_cfg.get("split_on_low_confidence"):
-            logger.warning(
-                "Low confidence manifest detected; splitting PDF into single pages",
-                extra={"context": "segment"},
-            )
-            min_conf = float(
-                pdf_cfg.get("min_confidence", cfg.get("min_confidence", 0.0))
-            )
-            pages_covered: set[int] = set()
-            high_conf_manifest: List[dict] = []
-            for item in manifest:
-                start = int(item.get("start_page", 0))
-                end = int(item.get("end_page", start))
-                conf = float(item.get("confidence", 1.0))
-                if conf >= min_conf:
-                    high_conf_manifest.append(item)
-                    pages_covered.update(range(start, end + 1))
-            for page_num in page_map:
-                if page_num not in pages_covered:
-                    high_conf_manifest.append(
-                        {
-                            "start_page": page_num,
-                            "end_page": page_num,
-                            "vendor": "",
-                            "invoice_number": "",
-                            "date": "",
-                            "amount": "",
-                            "confidence": 0.0,
-                        }
-                    )
-            manifest = sorted(high_conf_manifest, key=lambda m: m["start_page"])
-        else:
-            raise PDFSegmentationError("PDF segmentation confidence too low")
-
-    logger.info("Finished PDF segmentation", extra={"context": "segment"})
     return manifest
 
 
@@ -183,6 +147,12 @@ def segment(
     pdf_cfg = cfg.get("pdf", {})
     use_vision = pdf_cfg.get("use_vision", False)
 
+    reader = PdfReader(str(pdf_path))
+    page_map_all = list(range(1, len(reader.pages) + 1))
+
+    manifest: List[dict] | None = None
+    page_map: List[int] = page_map_all
+
     if use_vision:
         t0 = time.perf_counter()
         try:
@@ -198,67 +168,148 @@ def segment(
             metrics["pdf_seconds"] = time.perf_counter() - t0
         if manifest:
             logger.info("Vision segmentation succeeded", extra={"context": "segment"})
-            reader = PdfReader(str(pdf_path))
-            page_map = list(range(1, len(reader.pages) + 1))
-            return _finalize(manifest, page_map, cfg, metrics)
-        logger.warning(
-            "Vision segmentation returned no results; falling back to OCR",
-            extra={"context": "segment"},
-        )
+            manifest = _finalize(manifest, page_map_all, cfg, metrics)
 
-    reader = PdfReader(str(pdf_path))
-    ocr_cfg = cfg.get("ocr", {})
-    with ThreadPoolExecutor() as ex:
-        all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+    if manifest is None:
+        ocr_cfg = cfg.get("ocr", {})
+        with ThreadPoolExecutor() as ex:
+            all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
 
-    page_map = list(range(1, len(all_texts) + 1))
-    texts = all_texts
-    classifier = classifier or GeminiClassifier()
-    segmenter = segmenter or InvoiceSegmenter()
+        classifier = classifier or GeminiClassifier()
+        segmenter = segmenter or InvoiceSegmenter()
 
-    if pdf_cfg.get("remove_invoice_register", True):
-        classified: List[dict] | None = None
-        try:
-            classified = classifier.classify(all_texts, cfg)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Page classification error: %s", exc, extra={"context": "segment"}
-            )
-        if not classified and not isinstance(classifier, HeuristicClassifier):
-            logger.info(
-                "Falling back to heuristic page classification",
-                extra={"context": "segment"},
-            )
-            classified = HeuristicClassifier().classify(all_texts, cfg)
-        if not classified:
-            raise PDFSegmentationError("Page classification failed")
+        def run_with_classifier(cls: PageClassifier) -> tuple[List[dict], List[int]]:
+            texts = all_texts
+            page_map_local = page_map_all
+            if pdf_cfg.get("remove_invoice_register", True):
+                classified: List[dict] | None = None
+                try:
+                    classified = cls.classify(all_texts, cfg)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Page classification error: %s", exc, extra={"context": "segment"}
+                    )
+                if not classified and not isinstance(cls, HeuristicClassifier):
+                    logger.info(
+                        "Falling back to heuristic page classification",
+                        extra={"context": "segment"},
+                    )
+                    classified = HeuristicClassifier().classify(all_texts, cfg)
+                if not classified:
+                    raise PDFSegmentationError("Page classification failed")
 
-        threshold = float(pdf_cfg.get("classification_confidence_threshold", 0.0))
-        removed: Dict[str, int] = {}
-        keep_pages: List[int] = []
-        by_number = {int(c.get("page_number", 0)): c for c in classified}
-        for num in range(1, len(all_texts) + 1):
-            cls = by_number.get(
-                num, {"keep": True, "category": "unknown", "confidence": 1.0}
-            )
-            keep = bool(cls.get("keep"))
-            conf = float(cls.get("confidence", 0.0))
-            if keep and conf >= threshold:
-                keep_pages.append(num)
+                threshold = float(
+                    pdf_cfg.get("classification_confidence_threshold", 0.0)
+                )
+                removed: Dict[str, int] = {}
+                keep_pages: List[int] = []
+                by_number = {int(c.get("page_number", 0)): c for c in classified}
+                for num in range(1, len(all_texts) + 1):
+                    cls_res = by_number.get(
+                        num, {"keep": True, "category": "unknown", "confidence": 1.0}
+                    )
+                    keep = bool(cls_res.get("keep"))
+                    conf = float(cls_res.get("confidence", 0.0))
+                    if keep and conf >= threshold:
+                        keep_pages.append(num)
+                    else:
+                        cat = str(cls_res.get("category", "unknown"))
+                        removed[cat] = removed.get(cat, 0) + 1
+                if removed:
+                    logger.info(
+                        "Removed %s pages: %s",
+                        sum(removed.values()),
+                        removed,
+                        extra={"context": "segment"},
+                    )
+                texts = [all_texts[i - 1] for i in keep_pages]
+                page_map_local = keep_pages
+                if not texts:
+                    raise PDFSegmentationError("No invoice pages after classification")
+
+            man = segmenter.segment_invoices(texts, cfg)
+            man = _finalize(man, page_map_local, cfg, metrics)
+            return man, page_map_local
+
+        manifest, page_map = run_with_classifier(classifier)
+
+        fallback_used = "none"
+        if not _validate(manifest, len(page_map), cfg, metrics):
+            relaxed_cfg = copy.deepcopy(cfg)
+            relaxed_pdf = relaxed_cfg.setdefault("pdf", {})
+            relaxed_pdf["min_confidence"] = 0.0
+            relaxed_pdf["unmatched_threshold"] = 1.0
+            if _validate(manifest, len(page_map), relaxed_cfg, metrics):
+                fallback_used = "lower_confidence"
             else:
-                cat = str(cls.get("category", "unknown"))
-                removed[cat] = removed.get(cat, 0) + 1
-        if removed:
-            logger.info(
-                "Removed %s pages: %s",
-                sum(removed.values()),
-                removed,
-                extra={"context": "segment"},
-            )
-        texts = [all_texts[i - 1] for i in keep_pages]
-        page_map = keep_pages
-        if not texts:
-            raise PDFSegmentationError("No invoice pages after classification")
+                manifest, page_map = run_with_classifier(HeuristicClassifier())
+                if _validate(manifest, len(page_map), relaxed_cfg, metrics):
+                    fallback_used = "heuristic_classifier"
+                else:
+                    manifest = [
+                        {
+                            "start_page": p,
+                            "end_page": p,
+                            "vendor": "",
+                            "invoice_number": "",
+                            "date": "",
+                            "amount": "",
+                            "confidence": 0.0,
+                        }
+                        for p in page_map
+                    ]
+                    if metrics is not None:
+                        metrics["invoice_count"] = len(manifest)
+                    fallback_used = "page_per_invoice"
+        else:
+            fallback_used = "none"
 
-    manifest = segmenter.segment_invoices(texts, cfg)
-    return _finalize(manifest, page_map, cfg, metrics)
+        if metrics is not None:
+            metrics["fallback_used"] = fallback_used
+        for item in manifest:
+            item["fallback_used"] = fallback_used
+        logger.info("Finished PDF segmentation", extra={"context": "segment"})
+        return manifest
+
+    # vision path where manifest is not None
+    fallback_used = "none"
+    if not _validate(manifest, len(page_map_all), cfg, metrics):
+        relaxed_cfg = copy.deepcopy(cfg)
+        relaxed_pdf = relaxed_cfg.setdefault("pdf", {})
+        relaxed_pdf["min_confidence"] = 0.0
+        relaxed_pdf["unmatched_threshold"] = 1.0
+        if _validate(manifest, len(page_map_all), relaxed_cfg, metrics):
+            fallback_used = "lower_confidence"
+        else:
+            # Need OCR + heuristic fallback
+            ocr_cfg = cfg.get("ocr", {})
+            with ThreadPoolExecutor() as ex:
+                all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+            classifier = HeuristicClassifier()
+            segmenter = segmenter or InvoiceSegmenter()
+            manifest, page_map = run_with_classifier(classifier)
+            if _validate(manifest, len(page_map), relaxed_cfg, metrics):
+                fallback_used = "heuristic_classifier"
+            else:
+                manifest = [
+                    {
+                        "start_page": p,
+                        "end_page": p,
+                        "vendor": "",
+                        "invoice_number": "",
+                        "date": "",
+                        "amount": "",
+                        "confidence": 0.0,
+                    }
+                    for p in page_map
+                ]
+                if metrics is not None:
+                    metrics["invoice_count"] = len(manifest)
+                fallback_used = "page_per_invoice"
+
+    if metrics is not None:
+        metrics["fallback_used"] = fallback_used
+    for item in manifest:
+        item["fallback_used"] = fallback_used
+    logger.info("Finished PDF segmentation", extra={"context": "segment"})
+    return manifest
