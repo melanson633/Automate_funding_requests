@@ -41,4 +41,4 @@ jobs:
         run: pytest --cov=cre_advance --cov-report=xml
 
       - name: Secret scan
-        run: trufflehog --entropy --regex --json .
+        run: trufflehog --entropy=True --regex --json .
