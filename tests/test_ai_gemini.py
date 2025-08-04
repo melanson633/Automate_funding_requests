@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 from pathlib import Path
 
-import pytest
 import google.api_core  # noqa: F401
+import pytest
 from google.api_core import exceptions as google_exceptions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -149,3 +150,51 @@ def test_parse_manifest_response_success():
 def test_parse_manifest_response_invalid():
     with pytest.raises(ValueError):
         ai_gemini.parse_manifest_response("not json")
+
+
+def test_stream_generate_content(monkeypatch):
+    class Chunk:
+        def __init__(self, text):
+            self.text = text
+
+    class FakeModels:
+        def generate_content(self, model, contents, config, stream):
+            assert stream is True
+            yield Chunk("a")
+            yield Chunk("b")
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(ai_gemini, "_get_client", lambda cfg: FakeClient())
+
+    result = "".join(ai_gemini.stream_generate_content("p", {}))
+    assert result == "ab"
+
+
+def test_async_generate_content(monkeypatch):
+    called = []
+
+    def fake_invoke(prompt, cfg, temperature, tools):
+        called.append(prompt)
+        return f"resp:{prompt}"
+
+    counter = {"cur": 0, "max": 0}
+
+    async def fake_to_thread(func, *args, **kwargs):
+        counter["cur"] += 1
+        counter["max"] = max(counter["max"], counter["cur"])
+        await asyncio.sleep(0)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            counter["cur"] -= 1
+
+    monkeypatch.setattr(ai_gemini, "_invoke_model", fake_invoke)
+    monkeypatch.setattr(ai_gemini.asyncio, "to_thread", fake_to_thread)
+
+    res = asyncio.run(
+        ai_gemini.async_generate_content(["a", "b", "c"], {}, concurrency_limit=2)
+    )
+    assert res == ["resp:a", "resp:b", "resp:c"]
+    assert counter["max"] <= 2

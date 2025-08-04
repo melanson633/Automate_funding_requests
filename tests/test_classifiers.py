@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import pytest
+import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
 
-from cre_advance.classifiers import HeuristicClassifier
+from cre_advance import ai_gemini
+from cre_advance.classifiers import GeminiClassifier, HeuristicClassifier
 
 
 @pytest.mark.parametrize(
@@ -61,3 +64,26 @@ def test_vendor_invoice_detection() -> None:
     res = clf.classify([text], cfg)
     assert res[0]["category"] == "invoice"
     assert res[0]["keep"] is True
+
+
+def test_gemini_classifier_batched(monkeypatch):
+    clf = GeminiClassifier()
+    seen: list[str] = []
+
+    async def fake_async_generate_content(prompts, cfg, concurrency_limit=None):
+        seen.extend(prompts)
+        results = []
+        for p in prompts:
+            pages = p.split("\n---\n")
+            results.append(ai_gemini.classify_pages(pages, cfg))
+        return results
+
+    monkeypatch.setattr(
+        ai_gemini, "async_generate_content", fake_async_generate_content
+    )
+
+    pages = [["Invoice", "Bill To", "Other"]]
+    cfg = {"batch_size": 2}
+    res = asyncio.run(clf.classify_async(pages, cfg))
+    assert len(res[0]) == 3
+    assert seen == ["Invoice\n---\nBill To", "Other"]

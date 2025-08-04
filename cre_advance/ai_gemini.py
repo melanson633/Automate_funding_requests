@@ -8,16 +8,41 @@ calling.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+import types as pytypes
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List
 
-from google import genai
-from google.api_core import exceptions as google_exceptions
-from google.genai import types
+try:  # pragma: no cover - import guard for tests
+    from google import genai
+    from google.api_core import exceptions as google_exceptions
+    from google.genai import types
+except Exception:  # noqa: BLE001
+    genai = pytypes.SimpleNamespace(Client=lambda *_, **__: None)
+
+    class _DummyExc(Exception):
+        pass
+
+    google_exceptions = pytypes.SimpleNamespace(  # type: ignore[assignment]
+        BadRequest=_DummyExc,
+        GoogleAPIError=_DummyExc,
+        ResourceExhausted=_DummyExc,
+        ServiceUnavailable=_DummyExc,
+        DeadlineExceeded=_DummyExc,
+    )
+    types = pytypes.SimpleNamespace(  # type: ignore[assignment]
+        RetryOptions=lambda **kwargs: None,
+        GenerateContentConfig=lambda **kwargs: None,
+    )
+
+if not hasattr(types, "GenerateContentConfig"):
+    types.GenerateContentConfig = lambda **kwargs: None  # type: ignore[attr-defined]
+if not hasattr(types, "RetryOptions"):
+    types.RetryOptions = lambda **kwargs: None  # type: ignore[attr-defined]
 
 from .utils.logging import get_logger
 
@@ -140,7 +165,9 @@ def classify_page(text: str) -> bool:
     return any(token in lowered for token in indicators)
 
 
-def classify_pages(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+def classify_pages(
+    pages: List[str], cfg: Dict[str, Any] | None = None
+) -> List[Dict[str, Any]]:
     """Classify a batch of pages.
 
     Args:
@@ -344,6 +371,71 @@ def _invoke_model(
     except Exception as exc:  # noqa: BLE001
         logger.error("Unexpected Gemini error: %s", exc)
         raise
+
+
+def stream_generate_content(
+    prompt: str,
+    cfg: Dict[str, Any] | None = None,
+    temperature: float | None = None,
+    tools: List[Any] | None = None,
+):
+    """Yield streaming chunks from Gemini for ``prompt``."""
+
+    cfg = cfg or {}
+    client = _get_client(cfg)
+    model_name = cfg.get("gemini_model", _MODEL_NAME)
+
+    temp = (
+        temperature if temperature is not None else cfg.get("gemini_temperature", 0.1)
+    )
+
+    generation_config = types.GenerateContentConfig(
+        temperature=temp,
+        max_output_tokens=2048,
+        tools=tools or [map_headers, classify_page, detect_invoice_starts],
+    )
+
+    try:
+        logger.debug("Gemini stream prompt: %s", prompt)
+        responses = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=generation_config,
+            stream=True,
+        )
+        for chunk in responses:
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
+    except google_exceptions.GoogleAPIError as exc:
+        logger.error("Gemini API error: %s", exc)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected Gemini error: %s", exc)
+        raise
+
+
+async def async_generate_content(
+    prompts: List[str],
+    cfg: Dict[str, Any] | None = None,
+    concurrency_limit: int | None = None,
+    temperature: float | None = None,
+    tools: List[Any] | None = None,
+) -> List[Any]:
+    """Asynchronously invoke Gemini for multiple prompts."""
+
+    cfg = cfg or {}
+    limit = concurrency_limit or int(cfg.get("concurrency_limit", 5))
+    semaphore = asyncio.Semaphore(limit)
+
+    async def _call(prompt: str) -> Any:
+        async with semaphore:
+            return await asyncio.to_thread(
+                _invoke_model, prompt, cfg, temperature, tools
+            )
+
+    tasks = [_call(p) for p in prompts]
+    return await asyncio.gather(*tasks)
 
 
 def invoke_multimodal(contents: List[Any], cfg: Dict[str, Any]) -> Any:

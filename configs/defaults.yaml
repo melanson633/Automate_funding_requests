@@ -7,6 +7,8 @@ min_confidence: 0.0
 model_tier: pro
 gemini_temperature: 0.1
 gemini_max_retries: 3
+concurrency_limit: 5
+batch_size: 20
 auto_save_schemas: true
 packager:
   vendor_ratio_threshold: 0.8

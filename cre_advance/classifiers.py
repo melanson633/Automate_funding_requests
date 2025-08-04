@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Page classification utilities."""
 
+import asyncio
 import re
 from abc import ABC, abstractmethod
 from typing import List
@@ -31,6 +32,32 @@ class PageClassifier(ABC):
 
 class GeminiClassifier(PageClassifier):
     """Gemini based page classifier."""
+
+    async def _classify_single(self, pages: List[str], cfg: dict) -> List[dict]:
+        batch_size = int(cfg.get("batch_size", 20))
+        prompts = [
+            "\n---\n".join(pages[i : i + batch_size])
+            for i in range(0, len(pages), batch_size)
+        ]
+        responses = await ai_gemini.async_generate_content(
+            prompts,
+            cfg,
+            concurrency_limit=cfg.get("concurrency_limit"),
+        )
+        results: List[dict] = []
+        offset = 0
+        for batch in responses:
+            for item in batch or []:
+                item["page_number"] += offset
+                results.append(item)
+            offset += len(batch or [])
+        return results
+
+    async def classify_async(
+        self, pdfs: List[List[str]], cfg: dict
+    ) -> List[List[dict]]:
+        tasks = [self._classify_single(pages, cfg) for pages in pdfs]
+        return await asyncio.gather(*tasks)
 
     def classify(self, pages: List[str], cfg: dict) -> List[dict]:
         try:
