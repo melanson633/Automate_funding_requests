@@ -12,6 +12,7 @@ import json
 import os
 import re
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Dict, List
 
 from google import genai
@@ -24,6 +25,7 @@ logger = get_logger(__name__)
 
 _MODEL_NAME = "gemini-2.5-pro"
 _MAX_RETRIES = 3
+_CACHE_MAXSIZE = int(os.getenv("AI_CACHE_MAXSIZE", 128))
 
 _client = None
 
@@ -44,23 +46,25 @@ def _get_client(cfg: Dict[str, Any] | None = None):
     return _client
 
 
-def map_headers(
-    headers: List[str], sample_rows: List[Dict[str, Any]], target_fields: List[str]
+def _serialize_rows(rows: List[Dict[str, Any]]) -> tuple[str, ...]:
+    """Return a hashable representation of ``rows`` for caching."""
+
+    return tuple(json.dumps(r, sort_keys=True) for r in rows)
+
+
+@lru_cache(maxsize=_CACHE_MAXSIZE)
+def _map_headers_cached(
+    headers_key: tuple[str, ...],
+    sample_rows_key: tuple[str, ...],
+    target_fields_key: tuple[str, ...],
 ) -> Dict[str, str]:
-    """Map raw headers to canonical target fields.
+    headers = list(headers_key)
+    sample_rows = [json.loads(r) for r in sample_rows_key]
+    target_fields = list(target_fields_key)
+    # ``sample_rows`` is currently unused but included to key the cache
+    # correctly should usage change in the future.
+    _ = sample_rows
 
-    The implementation uses basic case-insensitive and substring matching
-    so it can run locally when invoked by the model.
-
-    Args:
-        headers: Raw column headers from an incoming spreadsheet.
-        sample_rows: Example rows providing context (currently unused).
-        target_fields: Canonical field names.
-
-    Returns:
-        Mapping from each raw header to the best matching target field. If
-        no reasonable match is found an empty string is used.
-    """
     mapping: Dict[str, str] = {}
     target_lookup = {f.lower(): f for f in target_fields}
     for hdr in headers:
@@ -79,11 +83,48 @@ def map_headers(
     return mapping
 
 
+def map_headers(
+    headers: List[str], sample_rows: List[Dict[str, Any]], target_fields: List[str]
+) -> Dict[str, str]:
+    """Map raw headers to canonical target fields.
+
+    Results are cached to avoid recomputing mappings for identical input
+    sets. The cache size is controlled via the ``AI_CACHE_MAXSIZE``
+    environment variable. The underlying :func:`functools.lru_cache`
+    implementation employs a thread lock, so the function is safe for
+    concurrent use. Callers should treat the returned mapping as
+    immutable.
+
+    Args:
+        headers: Raw column headers from an incoming spreadsheet.
+        sample_rows: Example rows providing context (currently unused).
+        target_fields: Canonical field names.
+
+    Returns:
+        Mapping from each raw header to the best matching target field. If
+        no reasonable match is found an empty string is used.
+    """
+    headers_key = tuple(headers)
+    sample_rows_key = _serialize_rows(sample_rows)
+    target_fields_key = tuple(target_fields)
+    return dict(_map_headers_cached(headers_key, sample_rows_key, target_fields_key))
+
+
+map_headers.cache_info = _map_headers_cached.cache_info  # type: ignore[attr-defined]
+map_headers.cache_clear = _map_headers_cached.cache_clear  # type: ignore[attr-defined]
+
+
+@lru_cache(maxsize=_CACHE_MAXSIZE)
 def classify_page(text: str) -> bool:
     """Determine whether a page of text is an invoice.
 
     Heuristics look for the word ``invoice`` alongside common invoice
-    components like ``bill to`` or ``invoice #``.
+    components like ``bill to`` or ``invoice #``. Results are cached to
+    minimise repeated classification of the same text. The cache size is
+    controlled by the ``AI_CACHE_MAXSIZE`` environment variable.
+
+    ``functools.lru_cache`` uses an internal lock making this function
+    thread-safe; the returned boolean is immutable.
 
     Args:
         text: OCR or extracted text for a single PDF page.
@@ -124,13 +165,16 @@ def classify_pages(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[
     return results
 
 
+@lru_cache(maxsize=_CACHE_MAXSIZE)
 def extract_metadata(text: str) -> Dict[str, str]:
     """Extract basic invoice metadata from ``text``.
 
     This heuristic function enables local execution and serves as a
-    fallback when the Gemini model is unavailable. It looks for common
-    patterns representing vendor name, invoice number, invoice date, and
-    amount.
+    fallback when the Gemini model is unavailable. Results are cached so
+    identical invoices are parsed only once. Cache size is governed by
+    the ``AI_CACHE_MAXSIZE`` environment variable. The cache is
+    thread-safe, but the returned dictionary should be treated as
+    read-only.
 
     Args:
         text: Full text of an invoice, potentially spanning multiple pages.
@@ -183,16 +227,9 @@ def extract_metadata(text: str) -> Dict[str, str]:
     }
 
 
-def detect_invoice_starts(pages: List[str]) -> List[int]:
-    """Detect start indices of invoices within a sequence of pages.
-
-    Args:
-        pages: Text for each page in reading order.
-
-    Returns:
-        A list of zero-indexed page numbers marking the start of each
-        invoice.
-    """
+@lru_cache(maxsize=_CACHE_MAXSIZE)
+def _detect_invoice_starts_cached(pages_key: tuple[str, ...]) -> List[int]:
+    pages = list(pages_key)
     starts: List[int] = []
     prev_is_invoice = False
     for idx, text in enumerate(pages):
@@ -201,6 +238,32 @@ def detect_invoice_starts(pages: List[str]) -> List[int]:
             starts.append(idx)
         prev_is_invoice = is_invoice
     return starts
+
+
+def detect_invoice_starts(pages: List[str]) -> List[int]:
+    """Detect start indices of invoices within a sequence of pages.
+
+    Results are cached based on the sequence of page text to reduce
+    repeated classification. Configure cache size with
+    ``AI_CACHE_MAXSIZE``. The underlying implementation is thread-safe;
+    callers must not mutate the returned list.
+
+    Args:
+        pages: Text for each page in reading order.
+
+    Returns:
+        A list of zero-indexed page numbers marking the start of each
+        invoice.
+    """
+    return list(_detect_invoice_starts_cached(tuple(pages)))
+
+
+detect_invoice_starts.cache_info = (  # type: ignore[attr-defined]
+    _detect_invoice_starts_cached.cache_info
+)
+detect_invoice_starts.cache_clear = (  # type: ignore[attr-defined]
+    _detect_invoice_starts_cached.cache_clear
+)
 
 
 def build_schema(

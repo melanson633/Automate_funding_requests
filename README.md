@@ -90,6 +90,17 @@ Dependencies
 	•	python-dotenv
 	•	google-genai (Gemini 2.5 Pro SDK)
 
+
+Caching
+-------
+
+Helper functions such as header mapping and page classification use
+``functools.lru_cache`` to avoid repeated computation and API calls.
+The cache holds 128 entries by default and can be tuned via the
+``AI_CACHE_MAXSIZE`` environment variable (see ``.env.example``). The
+cache employs internal locking and is safe for multi-threaded use, but
+callers should treat cached return values as read-only.
+
 Development Notes
 	•	Configuration files for lender-specific adjustments should be placed in configs/lenders/.
 	•	Utilize Cursor IDE with predefined rules in .cursor/config.json for intelligent development assistance.
