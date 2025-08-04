@@ -174,3 +174,62 @@ def test_segment_heuristic_fallback(monkeypatch) -> None:
     assert called["texts"] == ["Invoice #123\nBill To"]
     assert manifest[0]["start_page"] == 2
 
+
+def test_segment_vision_bypasses_ocr(monkeypatch) -> None:
+    pages = [FakePage("A"), FakePage("B")]
+    monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
+
+    fake_manifest = [
+        {
+            "start_page": 1,
+            "end_page": 2,
+            "vendor": "",
+            "invoice_number": "",
+            "date": "",
+            "amount": "",
+            "confidence": 1.0,
+        }
+    ]
+
+    from cre_advance import vision_segmenter as vs
+
+    monkeypatch.setattr(vs, "segment", lambda *a, **k: fake_manifest)
+    monkeypatch.setattr(
+        pdf_segmenter,
+        "_page_text",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("OCR called")),
+    )
+    monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
+
+    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"use_vision": True}})
+
+    assert manifest == fake_manifest
+
+
+def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
+    pages = [FakePage("A"), FakePage("B")]
+    monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
+
+    from cre_advance import vision_segmenter as vs
+
+    monkeypatch.setattr(vs, "segment", lambda *a, **k: None)
+
+    calls = {"count": 0}
+
+    def fake_page_text(page, cfg):
+        calls["count"] += 1
+        return "text"
+
+    monkeypatch.setattr(pdf_segmenter, "_page_text", fake_page_text)
+    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
+    monkeypatch.setattr(
+        pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
+    )
+    monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
+
+    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"use_vision": True}})
+
+    assert calls["count"] == 2
+    assert len(manifest) == 2
+    assert manifest[0]["start_page"] == 1 and manifest[1]["start_page"] == 2
+
