@@ -52,6 +52,28 @@ def test_extract_pages_text_uses_ocr_when_text_empty() -> None:
         ocr_mock.assert_called_once()
 
 
+def test_ocr_settings_passed() -> None:
+    """OCR settings from config are forwarded to Tesseract."""
+    with (
+        patch("cre_advance.pdf_parser.fitz.open", return_value=DummyDoc()),
+        patch(
+            "cre_advance.pdf_parser.Image.frombytes",
+            return_value=Image.new("RGB", (10, 10)),
+        ),
+        patch(
+            "cre_advance.pdf_parser.pytesseract.image_to_string",
+            return_value="TEXT",
+        ) as ocr_mock,
+    ):
+        doc = PDFDocument("dummy.pdf")
+        cfg = {"ocr": {"langs": ["eng"], "psm": 6, "oem": 1, "deskew": False}}
+        doc.extract_pages_text(cfg)
+        ocr_mock.assert_called_once()
+        args, kwargs = ocr_mock.call_args
+        assert kwargs["lang"] == "eng"
+        assert kwargs["config"] == "--psm 6 --oem 1"
+
+
 def test_deskew_improves_ocr_output() -> None:
     """Rotated images yield better OCR once deskewed."""
     font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"

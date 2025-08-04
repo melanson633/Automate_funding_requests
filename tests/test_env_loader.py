@@ -50,3 +50,12 @@ def test_default_gemini_model_when_missing(monkeypatch):
         assert cfg["gemini_model"] == "gemini-2.5-pro"
     finally:
         cfg_path.unlink()
+
+
+def test_ocr_defaults_loaded(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    cfg = get_config("example_lender")
+    ocr = cfg["ocr"]
+    assert ocr["langs"] == ["eng"]
+    assert ocr["psm"] == 6
+    assert ocr["oem"] == 1
