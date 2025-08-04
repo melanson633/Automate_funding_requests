@@ -3,6 +3,7 @@ from __future__ import annotations
 """Utilities for normalising Yardi Excel exports."""
 
 import difflib
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
@@ -11,6 +12,7 @@ import pandas as pd
 import yaml
 
 from . import ai_gemini
+from .metrics import log_metric
 from .utils.errors import NormalizationError
 from .utils.logging import get_logger
 
@@ -90,12 +92,16 @@ def normalize(
     NormalizationError
         If more than 40% of required columns are unmapped.
     """
+    t0 = time.perf_counter()
     wb_paths = (
         [Path(workbooks)]
         if isinstance(workbooks, str)
         else [Path(p) for p in workbooks]
     )
-    logger.info("Starting Excel normalization", extra={"context": "normalize"})
+    logger.info(
+        "Starting Excel normalization",
+        extra={"context": {"file": str(wb_paths[0])}},
+    )
     excel_cfg = cfg.get("excel", {})
     header_row = int(excel_cfg.get("header_row", 4))
     sheet_name = excel_cfg.get("sheet_name", "Driver")
@@ -204,13 +210,32 @@ def normalize(
             filtered_count = before_count - len(normalized)
             
             if filtered_count > 0:
-                logger.info(f"Filtered {filtered_count} previously funded invoices", extra={"context": "normalize"})
+                logger.info(
+                    f"Filtered {filtered_count} previously funded invoices",
+                    extra={"context": {"file": str(wb_paths[0])}},
+                )
                 if metrics is not None:
                     metrics["filtered_invoices"] = filtered_count
-                    excluded_data = excluded_invoices[["invoice_number", vendor_col, "amount"]].to_dict("records")
+                    excluded_data = excluded_invoices[
+                        ["invoice_number", vendor_col, "amount"]
+                    ].to_dict("records")
                     metrics["excluded_invoices"] = excluded_data
-                    excluded_summary = [f"{item['invoice_number']}|{item[vendor_col]}|${item['amount']}" for item in excluded_data]
-                    logger.info(f"Excluded invoice details: {excluded_summary}", extra={"context": "normalize"})
+                    excluded_summary = [
+                        f"{item['invoice_number']}|{item[vendor_col]}|${item['amount']}"
+                        for item in excluded_data
+                    ]
+                    logger.info(
+                        f"Excluded invoice details: {excluded_summary}",
+                        extra={"context": {"file": str(wb_paths[0])}},
+                    )
     
-    logger.info("Finished Excel normalization", extra={"context": "normalize"})
+    duration = time.perf_counter() - t0
+    if metrics is not None:
+        metrics["processing_seconds"] = duration
+        for key, value in metrics.items():
+            log_metric(f"excel_{key}", value, tags={"file": str(wb_paths[0])})
+    logger.info(
+        "Finished Excel normalization",
+        extra={"context": {"file": str(wb_paths[0])}},
+    )
     return normalized, raw_df

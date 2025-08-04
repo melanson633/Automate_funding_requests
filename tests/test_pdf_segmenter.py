@@ -103,9 +103,10 @@ def test_page_text_uses_ocr(monkeypatch):
 
     monkeypatch.setattr(pdf_segmenter.pytesseract, "image_to_string", fake_ocr)
 
-    text = pdf_segmenter._page_text(page, {"tesseract_cmd": None})
+    text, used_ocr = pdf_segmenter._page_text(page, {"tesseract_cmd": None})
 
     assert text.strip() == "hello"
+    assert used_ocr
     assert called.get("ocr")
 
 
@@ -305,7 +306,7 @@ def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
 
     def fake_page_text(page, cfg):
         calls["count"] += 1
-        return "text"
+        return "text", False
 
     monkeypatch.setattr(pdf_segmenter, "_page_text", fake_page_text)
     monkeypatch.setattr(

@@ -14,6 +14,7 @@ from pypdf import PdfReader
 
 from . import ai_gemini
 from .classifiers import GeminiClassifier, HeuristicClassifier, PageClassifier
+from .metrics import log_metric
 from .segmenters import InvoiceSegmenter
 from .utils.errors import PDFSegmentationError
 from .utils.logging import get_logger
@@ -21,11 +22,11 @@ from .utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _page_text(page: Any, ocr_cfg: dict) -> str:
-    """Return extracted text or OCR result for ``page``."""
+def _page_text(page: Any, ocr_cfg: dict) -> tuple[str, bool]:
+    """Return extracted text or OCR result flag for ``page``."""
     text = page.extract_text() or ""
     if text.strip():
-        return text
+        return text, False
 
     tesseract_cmd = ocr_cfg.get("tesseract_cmd")
     if tesseract_cmd:
@@ -37,8 +38,10 @@ def _page_text(page: Any, ocr_cfg: dict) -> str:
             pil_img = img.image if hasattr(img, "image") else Image.open(img.data)
             texts.append(pytesseract.image_to_string(pil_img, lang="eng"))
         except Exception as exc:  # noqa: BLE001 broad to avoid OCR crash
-            logger.warning("OCR failed on image: %s", exc, extra={"context": "segment"})
-    return "\n".join(texts)
+            logger.warning(
+                "OCR failed on image: %s", exc, extra={"context": "segment"}
+            )
+    return "\n".join(texts), True
 
 
 def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
@@ -143,7 +146,11 @@ def segment(
         classifier: Page classifier instance. Defaults to ``GeminiClassifier``.
         segmenter: Invoice segmenter instance. Defaults to ``InvoiceSegmenter``.
     """
-    logger.info("Starting PDF segmentation", extra={"context": "segment"})
+    logger.info(
+        "Starting PDF segmentation",
+        extra={"context": {"file": str(pdf_path)}},
+    )
+    start_all = time.perf_counter()
     pdf_cfg = cfg.get("pdf", {})
     use_vision = pdf_cfg.get("use_vision", False)
 
@@ -161,19 +168,31 @@ def segment(
             manifest = vision_segmenter.segment(pdf_path, cfg, metrics)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Vision segmentation error: %s", exc, extra={"context": "segment"}
+                "Vision segmentation error: %s",
+                exc,
+                extra={"context": {"file": str(pdf_path)}},
             )
             manifest = None
         if metrics is not None:
             metrics["pdf_seconds"] = time.perf_counter() - t0
         if manifest:
-            logger.info("Vision segmentation succeeded", extra={"context": "segment"})
+            logger.info(
+                "Vision segmentation succeeded",
+                extra={"context": {"file": str(pdf_path)}},
+            )
             manifest = _finalize(manifest, page_map_all, cfg, metrics)
 
     if manifest is None:
         ocr_cfg = cfg.get("ocr", {})
         with ThreadPoolExecutor() as ex:
-            all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+            text_results = list(
+                ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages)
+            )
+        all_texts = [t for t, _ in text_results]
+        ocr_pages = sum(1 for _, flag in text_results if flag)
+        if metrics is not None:
+            metrics["ocr_pages"] = ocr_pages
+            metrics["ocr_quality"] = 1 - ocr_pages / max(1, len(text_results))
 
         classifier = classifier or GeminiClassifier()
         segmenter = segmenter or InvoiceSegmenter()
@@ -185,6 +204,14 @@ def segment(
                 classified: List[dict] | None = None
                 try:
                     classified = cls.classify(all_texts, cfg)
+                    if metrics is not None and classified:
+                        conf_vals = [
+                            float(c.get("confidence", 0.0)) for c in classified
+                        ]
+                        if conf_vals:
+                            metrics["classification_confidence"] = sum(conf_vals) / len(
+                                conf_vals
+                            )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "Page classification error: %s", exc, extra={"context": "segment"}
@@ -266,9 +293,21 @@ def segment(
 
         if metrics is not None:
             metrics["fallback_used"] = fallback_used
+            total = metrics.get("total_pages", 0)
+            unmatched = metrics.get("unmatched_pages", 0)
+            if total:
+                metrics["segmentation_confidence"] = 1 - unmatched / total
+            metrics["processing_seconds"] = time.perf_counter() - start_all
+            for key, value in metrics.items():
+                log_metric(
+                    f"pdf_{key}", value, tags={"file": str(pdf_path)}
+                )
         for item in manifest:
             item["fallback_used"] = fallback_used
-        logger.info("Finished PDF segmentation", extra={"context": "segment"})
+        logger.info(
+            "Finished PDF segmentation",
+            extra={"context": {"file": str(pdf_path)}},
+        )
         return manifest
 
     # vision path where manifest is not None
@@ -284,7 +323,14 @@ def segment(
             # Need OCR + heuristic fallback
             ocr_cfg = cfg.get("ocr", {})
             with ThreadPoolExecutor() as ex:
-                all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+                text_results = list(
+                    ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages)
+                )
+            all_texts = [t for t, _ in text_results]
+            ocr_pages = sum(1 for _, flag in text_results if flag)
+            if metrics is not None:
+                metrics["ocr_pages"] = ocr_pages
+                metrics["ocr_quality"] = 1 - ocr_pages / max(1, len(text_results))
             classifier = HeuristicClassifier()
             segmenter = segmenter or InvoiceSegmenter()
             manifest, page_map = run_with_classifier(classifier)
@@ -309,7 +355,17 @@ def segment(
 
     if metrics is not None:
         metrics["fallback_used"] = fallback_used
+        total = metrics.get("total_pages", 0)
+        unmatched = metrics.get("unmatched_pages", 0)
+        if total:
+            metrics["segmentation_confidence"] = 1 - unmatched / total
+        metrics["processing_seconds"] = time.perf_counter() - start_all
+        for key, value in metrics.items():
+            log_metric(f"pdf_{key}", value, tags={"file": str(pdf_path)})
     for item in manifest:
         item["fallback_used"] = fallback_used
-    logger.info("Finished PDF segmentation", extra={"context": "segment"})
+    logger.info(
+        "Finished PDF segmentation",
+        extra={"context": {"file": str(pdf_path)}},
+    )
     return manifest
