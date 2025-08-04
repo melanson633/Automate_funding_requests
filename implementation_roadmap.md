@@ -62,13 +62,25 @@ Automate_funding_requests/
 
 ## 3  Build Order & Parallel Tracks
 
-1. **Phase 0 – Utilities & Config loader**  
-2. **Phase 1 – `ai_gemini` wrapper** (unblocks everything)  
-3. **Phase 2 – Excel normalizer** (parallel with Phase 3)  
-4. **Phase 3 – PDF segmenter**  
-5. **Phase 4 – File packager**  
-6. **Phase 5 – Pipeline + CLI**  
-7. **Phase 6 – Tests & performance tuning**  
+1. **Phase 0 – Utilities & Config loader**
+2. **Phase 1 – `ai_gemini` wrapper** (unblocks everything)
+3. **Phase 2 – Excel normalizer** (parallel with Phase 3)
+4. **Phase 3 – PDF segmenter**
+5. **Phase 4 – File packager**
+6. **Phase 5 – Pipeline + CLI**
+7. **Phase 6 – Tests & performance tuning**
+
+### Phase 3 – Vision‑LLM Integration
+
+Gemini 2.5 Vision now drives PDF segmentation.
+
+Delivered:
+- Vision-enabled wrapper around the Google SDK
+- Updated `pdf_segmenter` to call the Vision model
+- Config toggle and `--use-vision` CLI flag
+- OCR fallback when Vision text is absent
+
+*Reminder:* add performance benchmarks for Vision vs OCR.
 
 ---
 

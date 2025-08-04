@@ -64,6 +64,7 @@ cp .env.example .env
 Running the Pipeline
 
 Place your raw Yardi-exported Excel and PDF files into the ``data/input/`` directory.
+Ensure your `.env` file includes a valid `GOOGLE_API_KEY` for Gemini access.
 
 Run the automation script with the required arguments:
 
@@ -74,7 +75,7 @@ python bin/process_advance.py \
   --pdf Invoices.pdf \
   --lender example_lender \
   --output data/output \
-  --use-vision
+  [--use-vision]
 ```
 
 Processed funding packages will be saved under the specified output directory.
