@@ -12,7 +12,7 @@ should follow these guidelines to contribute smoothly and safely.
 |--------|--------|
 | **Goal** | Normalise Yardi Excel + segment multi‑invoice PDFs → lender‑ready Excel + PDF packet |
 | **Language** | Python 3.12 |
-| **Core Libs** | `pandas`, `openpyxl`, `pypdf`, `pytesseract`, `google‑generativeai` |
+| **Core Libs** | `pandas`, `openpyxl`, `pypdf`, `pytesseract`, `google-genai` |
 | **Entry Points** | `cre_advance/pipeline.py`, `bin/process_advance.py` |
 | **Phase Status** | ✅ Phase 0–1 complete; 🚧 Phase 2+ in progress |
 
@@ -21,7 +21,7 @@ should follow these guidelines to contribute smoothly and safely.
 ## 2  Agent Workflow
 
 1. **Read the Roadmap**  
-   Start with `implementation_roadmap.md.md` and the *revised* `codex_prompting_plan_phase2_revision.md`.
+   Start with `implementation_roadmap.md`.
 
 2. **Branch Per Phase**  
    Follow the naming convention `phase-N-<slug>`.
@@ -81,7 +81,7 @@ should follow these guidelines to contribute smoothly and safely.
 - [ ] Unit tests added / updated  
 - [ ] `pytest` passes  
 - [ ] `pre‑commit run --all-files` passes  
-- [ ] Docs updated (README / prompting plan)
+- [ ] Docs updated (README / roadmap)
 
 ---
 

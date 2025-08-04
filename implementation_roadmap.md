@@ -15,7 +15,7 @@ Automate_funding_requests/
 │   ├── pipeline.py                 # Orchestrator
 │   ├── excel_normalizer.py         # Yardi → Driver / INVOICES
 │   ├── pdf_segmenter.py            # Multi‑invoice PDF → per‑invoice metadata
-│   ├── ai_gemini.py                # Google Gemini 2.5 Pro wrapper
+│   ├── ai_gemini.py                # google-genai (Gemini 2.5 Pro) wrapper
 │   ├── file_packager.py            # Match, reorder, build outputs
 │   ├── future_development/
 │   │   └── orchestrator.py         # Placeholder for future orchestration features
@@ -47,7 +47,7 @@ Automate_funding_requests/
 | **utils/env.py**                       | Read `.env`, merge global + lender configs                                                                         | `get_config(lender)`                                             |
 | **utils/logging.py**                   | Console + file logging, log‑level control                                                                           | `get_logger(name)`                                               |
 | **utils/errors.py**                    | Custom error classes                                                                                                | `ConfigError`, `PDFSegmentationError`, etc.                     |
-| **ai_gemini.py**                       | Thin wrapper over Gemini SDK; prompt templates; retries                                                            | `map_schema`, `segment_pdf`, `extract_metadata`, `build_schema`  |
+| **ai_gemini.py**                       | Thin wrapper over `google-genai` SDK; prompt templates; retries                      | `map_schema`, `segment_pdf`, `extract_metadata`, `build_schema`  |
 | **excel_normalizer.py**                | Detect header row (defaulting to row 4 of the **Driver** tab), call `map_schema`, clean + cast data, write tabs    | `normalize(path, config)`                                       |
 | **pdf_segmenter.py**                   | Extract text/OCR, classify pages, call `segment_pdf`, derive page ranges                                                            | `segment(pdf_path, config)`                                     |
 | **file_packager.py**                   | Match invoices, rebuild PDF, write Invoice Log, output Excel & JSON report                                         | `package(normalized_df, manifest, template_xlsx)`               |

@@ -1,6 +1,8 @@
 Automate Funding Requests
 
-This project automates the preparation and organization of bank advance requests for commercial real estate (CRE) properties. It intelligently transforms Yardi-exported Excel reports and multi-invoice PDFs into standardized lender-ready funding packages using Python and Google’s Gemini 2.5 Pro AI.
+This project automates the preparation and organization of bank advance requests for commercial real estate (CRE) properties. It intelligently transforms Yardi-exported Excel reports and multi-invoice PDFs into standardized lender-ready funding packages using Python and Google’s Gemini 2.5 Pro AI via the `google-genai` SDK.
+
+For architecture details and build phases, see [implementation_roadmap.md](implementation_roadmap.md).
 
 Features
 	•	Automated Excel Normalization: Parses and standardizes Excel reports from Yardi Voyager to match the required Invoice Log format.
