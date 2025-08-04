@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import pytesseract
 from PIL import Image
@@ -32,13 +32,13 @@ class OCRService:
         if cmd:
             pytesseract.pytesseract.tesseract_cmd = cmd
 
-    def extract(self, page: Any) -> Tuple[str, bool]:
+    def extract(self, page: Any) -> tuple[str, bool]:
         """Return text for ``page`` and whether OCR was used."""
         text = page.extract_text() or ""
         if text.strip():
             return text, False
 
-        texts: List[str] = []
+        texts: list[str] = []
         for img in page.images:
             try:
                 pil_img = img.image if hasattr(img, "image") else Image.open(img.data)
@@ -58,11 +58,11 @@ class PDFDocument:
         self.reader = PdfReader(str(self.path))
 
     @property
-    def pages(self) -> List[Any]:
+    def pages(self) -> list[Any]:
         return list(self.reader.pages)
 
     @property
-    def page_map(self) -> List[int]:
+    def page_map(self) -> list[int]:
         return list(range(1, len(self.reader.pages) + 1))
 
 
@@ -70,10 +70,10 @@ class PDFDocument:
 class Manifest:
     """Container for invoice segmentation results."""
 
-    items: List[dict] = field(default_factory=list)
+    items: list[dict] = field(default_factory=list)
 
     @staticmethod
-    def _derive_ranges(manifest: List[dict], total_pages: int) -> List[dict]:
+    def _derive_ranges(manifest: list[dict], total_pages: int) -> list[dict]:
         manifest = sorted(manifest, key=lambda m: m.get("start_page", 0))
         for idx, item in enumerate(manifest):
             next_start = (
@@ -85,7 +85,7 @@ class Manifest:
         return manifest
 
     def finalize(
-        self, page_map: List[int], cfg: dict, metrics: Optional[dict] = None
+        self, page_map: list[int], cfg: dict, metrics: Optional[dict] = None
     ) -> None:
         if metrics is not None:
             metrics["total_pages"] = len(page_map)
@@ -150,11 +150,11 @@ class Manifest:
             return False
         return True
 
-    def to_list(self) -> List[dict]:
+    def to_list(self) -> list[dict]:
         return list(self.items)
 
 
-def create_services(cfg: dict) -> Tuple[OCRService, PageClassifier, InvoiceSegmenter]:
+def create_services(cfg: dict) -> tuple[OCRService, PageClassifier, InvoiceSegmenter]:
     """Factory returning default OCR, classifier and segmenter."""
     return OCRService(cfg.get("ocr", {})), GeminiClassifier(), InvoiceSegmenter()
 
@@ -166,7 +166,7 @@ def segment(
     classifier: Optional[PageClassifier] = None,
     segmenter: Optional[InvoiceSegmenter] = None,
     ocr_service: Optional[OCRService] = None,
-) -> List[dict]:
+) -> list[dict]:
     """Return invoice manifest with page ranges for ``pdf_path``."""
     logger.info(
         "Starting PDF segmentation", extra={"context": {"file": str(pdf_path)}}
@@ -179,7 +179,7 @@ def segment(
     page_map_all = document.page_map
 
     manifest_obj: Optional[Manifest] = None
-    page_map: List[int] = page_map_all
+    page_map: list[int] = page_map_all
 
     if use_vision:
         t0 = time.perf_counter()
@@ -213,11 +213,11 @@ def segment(
         classifier = classifier or GeminiClassifier()
         segmenter = segmenter or InvoiceSegmenter()
 
-        def run_with_classifier(cls: PageClassifier) -> Tuple[Manifest, List[int]]:
+        def run_with_classifier(cls: PageClassifier) -> tuple[Manifest, list[int]]:
             texts = all_texts
             page_map_local = page_map_all
             if pdf_cfg.get("remove_invoice_register", True):
-                classified: List[dict] | None = None
+                classified: list[dict] | None = None
                 try:
                     classified = cls.classify(all_texts, cfg)
                     if metrics is not None and classified:
@@ -242,8 +242,8 @@ def segment(
                 threshold = float(
                     pdf_cfg.get("classification_confidence_threshold", 0.0)
                 )
-                removed: Dict[str, int] = {}
-                keep_pages: List[int] = []
+                removed: dict[str, int] = {}
+                keep_pages: list[int] = []
                 by_number = {int(c.get("page_number", 0)): c for c in classified}
                 for num in range(1, len(all_texts) + 1):
                     cls_res = by_number.get(
