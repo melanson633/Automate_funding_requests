@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from typing import Any, Dict, List
 
 from google import genai
 from google.genai import types
-import requests
 from google.api_core import exceptions as google_exceptions
 
 from .utils.logging import get_logger
@@ -32,7 +30,7 @@ def _get_client(cfg: Dict[str, Any] | None = None):
     """Get or create Gemini client instance."""
     global _client
     cfg = cfg or {}
-    
+
     if _client is None:
         api_key = os.getenv("GOOGLE_API_KEY")
         if not api_key:
@@ -40,7 +38,7 @@ def _get_client(cfg: Dict[str, Any] | None = None):
                 "GOOGLE_API_KEY not set. Create a .env file with your API key and retry."
             )
         _client = genai.Client(api_key=api_key)
-    
+
     return _client
 
 
@@ -52,8 +50,9 @@ def _request_json(
 ) -> Any:
     """Send a prompt to Gemini and return parsed JSON or ``None``.
 
-    Network related errors are retried with exponential backoff. Prompt
-    validation or parsing failures are logged and raised without retrying.
+    Network related errors are retried by the underlying SDK according to
+    ``RetryOptions``. Validation or parsing failures are logged and raised
+    without retrying.
     """
     cfg = cfg or {}
     client = _get_client(cfg)
@@ -71,85 +70,60 @@ def _request_json(
     }
     if schema is not None:
         config_params["response_schema"] = schema
-    generation_config = types.GenerateContentConfig(**config_params)
 
-    delay = 1.0
-    max_retries = int(cfg.get("gemini_max_retries", _MAX_RETRIES))
-    last_exc: Exception | None = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.debug("Gemini prompt: %s", prompt)
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=generation_config,
-            )
-            logger.debug("Gemini raw response: %s", resp.text)
-
-            if not resp.text:
-                logger.warning("Empty response from Gemini")
-                return None
-
-            # New SDK should return clean JSON, but handle legacy format just in case
-            text = resp.text.strip()
-            if text.startswith("```json"):
-                text = text[7:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-            return json.loads(text)
-
-        except json.JSONDecodeError as exc:
-            logger.error("Failed to decode JSON: %s", exc)
-            logger.error("Raw response text: %s", getattr(resp, "text", "<empty>"))
-            raise
-        except google_exceptions.BadRequest as exc:
-            logger.error("Gemini bad request: %s", exc)
-            logger.error("Prompt: %s", prompt)
-            logger.error("Temperature: %s", temp)
-            raise
-        except (
-            google_exceptions.DeadlineExceeded,
+    retry_options = types.RetryOptions(
+        max_retries=int(cfg.get("gemini_max_retries", _MAX_RETRIES)),
+        initial_delay=1.0,
+        backoff_multiplier=2.0,
+        max_delay=60.0,
+        retryable_errors=[
+            google_exceptions.ResourceExhausted,
             google_exceptions.ServiceUnavailable,
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ) as exc:
-            last_exc = exc
-            logger.warning(
-                "Transient Gemini error on attempt %s/%s: %s",
-                attempt,
-                max_retries,
-                exc,
-            )
-            if attempt < max_retries:
-                time.sleep(delay)
-                delay *= 2
-                continue
-        except google_exceptions.GoogleAPIError as exc:
-            logger.error("Gemini API error: %s", exc)
-            raise
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            logger.warning(
-                "Unexpected Gemini error on attempt %s/%s: %s",
-                attempt,
-                max_retries,
-                exc,
-            )
-            if attempt < max_retries:
-                time.sleep(delay)
-                delay *= 2
-                continue
-        break
-
-    logger.error(
-        "Gemini request failed after %s attempts. Prompt: %s | temperature=%s | model=%s",
-        max_retries,
-        prompt,
-        temp,
-        cfg.get("gemini_model", _MODEL_NAME),
+            google_exceptions.DeadlineExceeded,
+        ],
     )
-    raise RuntimeError("Gemini request failed") from last_exc
+
+    generation_config = types.GenerateContentConfig(
+        **config_params, retry_options=retry_options
+    )
+
+    try:
+        logger.debug("Gemini prompt: %s", prompt)
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=generation_config,
+        )
+        logger.debug("Gemini raw response: %s", resp.text)
+
+        if not resp.text:
+            logger.warning("Empty response from Gemini")
+            return None
+
+        # New SDK should return clean JSON, but handle legacy format just in case
+        text = resp.text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        return json.loads(text)
+
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to decode JSON: %s", exc)
+        logger.error("Raw response text: %s", getattr(resp, "text", "<empty>"))
+        raise
+    except google_exceptions.BadRequest as exc:
+        logger.error("Gemini bad request: %s", exc)
+        logger.error("Prompt: %s", prompt)
+        logger.error("Temperature: %s", temp)
+        raise
+    except google_exceptions.GoogleAPIError as exc:
+        logger.error("Gemini API error: %s", exc)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected Gemini error: %s", exc)
+        raise
 
 
 def map_schema(

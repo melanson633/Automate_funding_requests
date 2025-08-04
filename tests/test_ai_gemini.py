@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import google.api_core  # noqa: F401
+from google.api_core import exceptions as google_exceptions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -30,9 +31,19 @@ def test_classify_pages(monkeypatch):
         "From: Craig\nSent: yesterday",
     ]
     fake_resp = [
-        {"page_number": 1, "category": "invoice_register", "keep": False, "confidence": 0.9},
+        {
+            "page_number": 1,
+            "category": "invoice_register",
+            "keep": False,
+            "confidence": 0.9,
+        },
         {"page_number": 2, "category": "invoice", "keep": True, "confidence": 0.95},
-        {"page_number": 3, "category": "email_approval", "keep": False, "confidence": 0.8},
+        {
+            "page_number": 3,
+            "category": "email_approval",
+            "keep": False,
+            "confidence": 0.8,
+        },
     ]
     monkeypatch.setattr(
         ai_gemini,
@@ -42,3 +53,33 @@ def test_classify_pages(monkeypatch):
 
     out = ai_gemini.classify_pages(pages, {})
     assert out == fake_resp
+
+
+def test_request_json_raises_non_retryable(monkeypatch):
+    class FakeRetryOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeGenConfig:
+        def __init__(self, **kwargs):
+            self.retry_options = kwargs.get("retry_options")
+
+    monkeypatch.setattr(
+        ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False
+    )
+    monkeypatch.setattr(
+        ai_gemini.types, "GenerateContentConfig", FakeGenConfig, raising=False
+    )
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            assert isinstance(config.retry_options, FakeRetryOptions)
+            raise google_exceptions.BadRequest("bad request")
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(ai_gemini, "_get_client", lambda cfg: FakeClient())
+
+    with pytest.raises(google_exceptions.BadRequest):
+        ai_gemini._request_json("prompt", schema={}, cfg={})
