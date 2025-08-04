@@ -109,6 +109,14 @@ def get_config(lender: str) -> dict:
         if key not in config:
             raise ConfigError(f"Missing required config key: {key}")
 
+    # Normalise PDF configuration
+    pdf_cfg = config.setdefault("pdf", {})
+    pdf_cfg.setdefault("use_vision", False)
+    pdf_cfg.setdefault("vision_model", "gemini-2.5-pro")
+    pdf_cfg["max_pages_per_request"] = int(
+        pdf_cfg.get("max_pages_per_request", 3000)
+    )
+
     # Normalise OCR configuration
     ocr_cfg = config.setdefault("ocr", {})
     langs = ocr_cfg.get("langs", [])

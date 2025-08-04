@@ -59,3 +59,33 @@ def test_ocr_defaults_loaded(monkeypatch):
     assert ocr["langs"] == ["eng"]
     assert ocr["psm"] == 6
     assert ocr["oem"] == 1
+
+
+def test_pdf_defaults_loaded(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    cfg = get_config("example_lender")
+    pdf = cfg["pdf"]
+    assert pdf["use_vision"] is False
+    assert pdf["vision_model"] == "gemini-2.5-pro"
+    assert pdf["max_pages_per_request"] == 3000
+
+
+def test_pdf_lender_overrides(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    lender_name = "temp_pdf_lender"
+    lenders_dir = Path(__file__).resolve().parents[1] / "configs" / "lenders"
+    cfg_path = lenders_dir / f"{lender_name}.yaml"
+    cfg_path.write_text(
+        "pdf:\n"
+        "  use_vision: true\n"
+        "  vision_model: custom-model\n"
+        "  max_pages_per_request: 10\n"
+    )
+    try:
+        cfg = get_config(lender_name)
+        pdf = cfg["pdf"]
+        assert pdf["use_vision"] is True
+        assert pdf["vision_model"] == "custom-model"
+        assert pdf["max_pages_per_request"] == 10
+    finally:
+        cfg_path.unlink()
