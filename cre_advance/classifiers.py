@@ -6,6 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import List
 
+from . import ai_gemini
 from .utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,6 +27,21 @@ class PageClassifier(ABC):
             List of classification dictionaries containing ``page_number``,
             ``category``, ``keep`` and ``confidence``.
         """
+
+
+class GeminiClassifier(PageClassifier):
+    """Gemini based page classifier."""
+
+    def classify(self, pages: List[str], cfg: dict) -> List[dict]:
+        try:
+            return ai_gemini.classify_pages(pages, cfg) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Gemini page classification failed: %s",
+                exc,
+                extra={"context": "segment"},
+            )
+            return []
 
 
 class HeuristicClassifier(PageClassifier):

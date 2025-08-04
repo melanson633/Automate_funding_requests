@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import google.api_core  # noqa: F401
-from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
 
@@ -38,19 +37,18 @@ class FakeReader:
         self.pages = pages
 
 
-def _keep_all(_text: str) -> bool:
-    return True
-
-
 def test_segment_success(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
     monkeypatch.setattr(
         pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_confidence": 0.8}})
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf",
+        {"pdf": {"min_confidence": 0.8}},
+        classifier=pdf_segmenter.HeuristicClassifier(),
+    )
 
     assert manifest[0]["end_page"] == 1
     assert manifest[1]["end_page"] == 2
@@ -59,14 +57,17 @@ def test_segment_success(monkeypatch) -> None:
 def test_segment_low_conf(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
     monkeypatch.setattr(
         pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: False)
 
     with pytest.raises(pdf_segmenter.PDFSegmentationError):
-        pdf_segmenter.segment("dummy.pdf", {"pdf": {"min_confidence": 0.8}})
+        pdf_segmenter.segment(
+            "dummy.pdf",
+            {"pdf": {"min_confidence": 0.8}},
+            classifier=pdf_segmenter.HeuristicClassifier(),
+        )
 
 
 def test_page_text_uses_ocr(monkeypatch):
@@ -92,10 +93,11 @@ def test_page_text_uses_ocr(monkeypatch):
 def test_segment_fallback(monkeypatch):
     pages = [FakePage("A"), FakePage("B"), FakePage("C")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda t: [])
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {}})
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf", {"pdf": {}}, classifier=pdf_segmenter.HeuristicClassifier()
+    )
 
     assert len(manifest) == 3
     assert all(
@@ -107,7 +109,6 @@ def test_segment_fallback(monkeypatch):
 def test_low_conf_split(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
     monkeypatch.setattr(
         pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
@@ -116,6 +117,7 @@ def test_low_conf_split(monkeypatch) -> None:
     manifest = pdf_segmenter.segment(
         "dummy.pdf",
         {"pdf": {"min_confidence": 0.8, "split_on_low_confidence": True}},
+        classifier=pdf_segmenter.HeuristicClassifier(),
     )
 
     assert len(manifest) == 2
@@ -130,20 +132,17 @@ def test_segment_filters_pages(monkeypatch) -> None:
         FakePage("From: Craig\nSent: today"),
     ]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-
-    def fake_classify(text: str) -> bool:
-        return "invoice #" in text.lower()
-
     called = {}
 
     def fake_detect(texts):
         called["texts"] = list(texts)
         return [0]
 
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", fake_classify)
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", fake_detect)
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {}})
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf", {"pdf": {}}, classifier=pdf_segmenter.HeuristicClassifier()
+    )
 
     assert called["texts"] == ["Invoice #123\nBill To"]
     assert manifest[0]["start_page"] == 2
@@ -156,17 +155,16 @@ def test_segment_heuristic_fallback(monkeypatch) -> None:
         FakePage("Invoice #123\nBill To"),
     ]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-
-    def fail_classify(text: str) -> bool:
-        raise RuntimeError("boom")
-
     called = {}
 
     def fake_detect(texts):
         called["texts"] = list(texts)
         return [0]
 
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", fail_classify)
+    def fail_classify_pages(pages, cfg):  # noqa: ANN001
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_pages", fail_classify_pages)
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", fake_detect)
 
     manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {}})
@@ -201,7 +199,11 @@ def test_segment_vision_bypasses_ocr(monkeypatch) -> None:
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"use_vision": True}})
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf",
+        {"pdf": {"use_vision": True}},
+        classifier=pdf_segmenter.HeuristicClassifier(),
+    )
 
     assert manifest == fake_manifest
 
@@ -221,13 +223,16 @@ def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
         return "text"
 
     monkeypatch.setattr(pdf_segmenter, "_page_text", fake_page_text)
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_page", _keep_all)
     monkeypatch.setattr(
         pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
 
-    manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {"use_vision": True}})
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf",
+        {"pdf": {"use_vision": True}},
+        classifier=pdf_segmenter.HeuristicClassifier(),
+    )
 
     assert calls["count"] == 2
     assert len(manifest) == 2
