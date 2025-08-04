@@ -7,35 +7,47 @@ from typing import List
 
 import fitz
 import numpy as np
-from PIL import Image
 import pytesseract
+from PIL import Image
 
 from .utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-def _deskew_image(img: Image.Image) -> Image.Image:
-    """Return a deskewed copy of ``img`` using OpenCV."""
+def _deskew_image(img: Image.Image, cfg: dict) -> Image.Image:
+    """Return image rotated based on Tesseract orientation data.
+
+    Args:
+        img: Image to deskew.
+        cfg: Application configuration.
+
+    Returns:
+        Deskewed copy of ``img`` or the original image when orientation
+        detection fails.
+    """
     import cv2
 
-    array = np.array(img)
-    gray = cv2.cvtColor(array, cv2.COLOR_RGB2GRAY)
-    gray = cv2.bitwise_not(gray)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-    coords = np.column_stack(np.where(thresh > 0))
-    if coords.size == 0:
+    ocr_cfg = cfg.get("ocr", {})
+    tesseract_cmd = ocr_cfg.get("tesseract_cmd")
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    try:
+        osd = pytesseract.image_to_osd(img, output_type=pytesseract.Output.DICT)
+    except pytesseract.TesseractError:
         return img
-    angle = cv2.minAreaRect(coords)[-1]
-    if angle < -45:
-        angle = -(90 + angle)
-    else:
-        angle = -angle
-    h, w = array.shape[:2]
-    m = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
-    rotated = cv2.warpAffine(
-        array, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
-    )
+
+    rotate = osd.get("rotate", 0)
+    if rotate not in {90, 180, 270}:
+        return img
+
+    array = np.array(img)
+    if rotate == 90:
+        rotated = cv2.rotate(array, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    elif rotate == 180:
+        rotated = cv2.rotate(array, cv2.ROTATE_180)
+    else:  # 270
+        rotated = cv2.rotate(array, cv2.ROTATE_90_CLOCKWISE)
     return Image.fromarray(rotated)
 
 
@@ -58,13 +70,11 @@ class PDFDocument:
         for page_num, page in enumerate(self.doc, start=1):
             text = (page.get_text("text") or "").strip()
             if not text:
-                self.logger.debug(
-                    "Page %s yielded no text; performing OCR", page_num
-                )
+                self.logger.debug("Page %s yielded no text; performing OCR", page_num)
                 pix = page.get_pixmap()
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 if ocr_cfg.get("deskew"):
-                    img = _deskew_image(img)
+                    img = _deskew_image(img, cfg)
                 text = pytesseract.image_to_string(img, lang=langs)
             texts.append(text)
         return texts
