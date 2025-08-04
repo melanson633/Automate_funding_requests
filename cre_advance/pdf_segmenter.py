@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """PDF segmentation utilities."""
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List
@@ -117,80 +118,13 @@ def _heuristic_classify(pages: List[str]) -> List[dict]:
     return results
 
 
-def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> List[dict]:
-    """Return invoice manifest with page ranges for ``pdf_path``."""
-    logger.info("Starting PDF segmentation", extra={"context": "segment"})
-    reader = PdfReader(str(pdf_path))
-    ocr_cfg = cfg.get("ocr", {})
-    with ThreadPoolExecutor() as ex:
-        all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
-
-    pdf_cfg = cfg.get("pdf", {})
-    page_map = list(range(1, len(all_texts) + 1))
-    texts = all_texts
-
-    if pdf_cfg.get("remove_invoice_register", True):
-        classified: List[dict] | None = None
-        try:
-            classified = [
-                {
-                    "page_number": i + 1,
-                    "category": "invoice" if ai_gemini.classify_page(t) else "unknown",
-                    "keep": ai_gemini.classify_page(t),
-                    "confidence": 1.0,
-                }
-                for i, t in enumerate(all_texts)
-            ]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Gemini page classification failed: %s", exc, extra={"context": "segment"}
-            )
-        if not classified:
-            logger.info(
-                "Falling back to heuristic page classification",
-                extra={"context": "segment"},
-            )
-            classified = _heuristic_classify(all_texts)
-        if not classified:
-            raise PDFSegmentationError("Page classification failed")
-
-        threshold = float(pdf_cfg.get("classification_confidence_threshold", 0.0))
-        removed: Dict[str, int] = {}
-        keep_pages: List[int] = []
-        by_number = {int(c.get("page_number", 0)): c for c in classified}
-        for num in range(1, len(all_texts) + 1):
-            cls = by_number.get(num, {"keep": True, "category": "unknown", "confidence": 1.0})
-            keep = bool(cls.get("keep"))
-            conf = float(cls.get("confidence", 0.0))
-            if keep and conf >= threshold:
-                keep_pages.append(num)
-            else:
-                cat = str(cls.get("category", "unknown"))
-                removed[cat] = removed.get(cat, 0) + 1
-        if removed:
-            logger.info(
-                "Removed %s pages: %s",
-                sum(removed.values()),
-                removed,
-                extra={"context": "segment"},
-            )
-        texts = [all_texts[i - 1] for i in keep_pages]
-        page_map = keep_pages
-        if not texts:
-            raise PDFSegmentationError("No invoice pages after classification")
-
-    starts = ai_gemini.detect_invoice_starts(texts)
-    manifest = [
-        {
-            "start_page": idx + 1,
-            "vendor": "",
-            "invoice_number": "",
-            "date": "",
-            "amount": "",
-            "confidence": 1.0,
-        }
-        for idx in starts
-    ]
+def _finalize(
+    manifest: List[dict],
+    page_map: List[int],
+    cfg: dict,
+    metrics: dict | None = None,
+) -> List[dict]:
+    """Finalize manifest and run validation."""
     if metrics is not None:
         metrics["total_pages"] = len(page_map)
 
@@ -212,7 +146,8 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
             for p in page_map
         ]
     else:
-        manifest = _derive_ranges(manifest, len(page_map))
+        if any("end_page" not in m for m in manifest):
+            manifest = _derive_ranges(manifest, len(page_map))
         for item in manifest:
             start_idx = int(item.get("start_page", 1)) - 1
             end_idx = int(item.get("end_page", start_idx + 1)) - 1
@@ -260,3 +195,110 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
 
     logger.info("Finished PDF segmentation", extra={"context": "segment"})
     return manifest
+
+
+def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> List[dict]:
+    """Return invoice manifest with page ranges for ``pdf_path``."""
+    logger.info("Starting PDF segmentation", extra={"context": "segment"})
+    pdf_cfg = cfg.get("pdf", {})
+    use_vision = pdf_cfg.get("use_vision", False)
+
+    if use_vision:
+        t0 = time.perf_counter()
+        try:
+            from . import vision_segmenter
+
+            manifest = vision_segmenter.segment(pdf_path, cfg, metrics)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Vision segmentation error: %s", exc, extra={"context": "segment"}
+            )
+            manifest = None
+        if metrics is not None:
+            metrics["pdf_seconds"] = time.perf_counter() - t0
+        if manifest:
+            logger.info("Vision segmentation succeeded", extra={"context": "segment"})
+            reader = PdfReader(str(pdf_path))
+            page_map = list(range(1, len(reader.pages) + 1))
+            return _finalize(manifest, page_map, cfg, metrics)
+        logger.warning(
+            "Vision segmentation returned no results; falling back to OCR",
+            extra={"context": "segment"},
+        )
+
+    reader = PdfReader(str(pdf_path))
+    ocr_cfg = cfg.get("ocr", {})
+    with ThreadPoolExecutor() as ex:
+        all_texts = list(ex.map(lambda p: _page_text(p, ocr_cfg), reader.pages))
+
+    page_map = list(range(1, len(all_texts) + 1))
+    texts = all_texts
+
+    if pdf_cfg.get("remove_invoice_register", True):
+        classified: List[dict] | None = None
+        try:
+            classified = [
+                {
+                    "page_number": i + 1,
+                    "category": "invoice" if ai_gemini.classify_page(t) else "unknown",
+                    "keep": ai_gemini.classify_page(t),
+                    "confidence": 1.0,
+                }
+                for i, t in enumerate(all_texts)
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Gemini page classification failed: %s",
+                exc,
+                extra={"context": "segment"},
+            )
+        if not classified:
+            logger.info(
+                "Falling back to heuristic page classification",
+                extra={"context": "segment"},
+            )
+            classified = _heuristic_classify(all_texts)
+        if not classified:
+            raise PDFSegmentationError("Page classification failed")
+
+        threshold = float(pdf_cfg.get("classification_confidence_threshold", 0.0))
+        removed: Dict[str, int] = {}
+        keep_pages: List[int] = []
+        by_number = {int(c.get("page_number", 0)): c for c in classified}
+        for num in range(1, len(all_texts) + 1):
+            cls = by_number.get(
+                num, {"keep": True, "category": "unknown", "confidence": 1.0}
+            )
+            keep = bool(cls.get("keep"))
+            conf = float(cls.get("confidence", 0.0))
+            if keep and conf >= threshold:
+                keep_pages.append(num)
+            else:
+                cat = str(cls.get("category", "unknown"))
+                removed[cat] = removed.get(cat, 0) + 1
+        if removed:
+            logger.info(
+                "Removed %s pages: %s",
+                sum(removed.values()),
+                removed,
+                extra={"context": "segment"},
+            )
+        texts = [all_texts[i - 1] for i in keep_pages]
+        page_map = keep_pages
+        if not texts:
+            raise PDFSegmentationError("No invoice pages after classification")
+
+    starts = ai_gemini.detect_invoice_starts(texts)
+    manifest = [
+        {
+            "start_page": idx + 1,
+            "vendor": "",
+            "invoice_number": "",
+            "date": "",
+            "amount": "",
+            "confidence": 1.0,
+        }
+        for idx in starts
+    ]
+
+    return _finalize(manifest, page_map, cfg, metrics)
