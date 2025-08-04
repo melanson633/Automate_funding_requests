@@ -10,7 +10,7 @@ import fitz
 from google.genai import types
 
 from . import ai_gemini
-from .pdf_segmenter import _derive_ranges
+from .pdf_segmenter import Manifest
 from .utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -55,7 +55,7 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
         manifest = ai_gemini.parse_manifest_response(response)
 
         manifest = sorted(manifest, key=lambda m: m.get("start_page", 0))
-        manifest = _derive_ranges(manifest, len(parts))
+        manifest = Manifest._derive_ranges(manifest, len(parts))
         for item in manifest:
             item["start_page"] = int(item.get("start_page", 0))
             item["end_page"] = int(item.get("end_page", 0))

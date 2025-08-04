@@ -77,7 +77,15 @@ def run(args: Namespace, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
         try:
             logger.info("Segmenting PDF invoices", extra={"context": "segment"})
             t0 = time.perf_counter()
-            manifest = pdf_segmenter.segment(args.pdf, cfg, metrics=metrics)
+            ocr_service, classifier, inv_segmenter = pdf_segmenter.create_services(cfg)
+            manifest = pdf_segmenter.segment(
+                args.pdf,
+                cfg,
+                metrics=metrics,
+                classifier=classifier,
+                segmenter=inv_segmenter,
+                ocr_service=ocr_service,
+            )
             metrics["pdf_seconds"] = time.perf_counter() - t0
             manifest_path = staging_dir / f"manifest_{timestamp}.json"
             manifest_path.write_text(json.dumps(manifest, indent=2))

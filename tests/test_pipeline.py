@@ -24,7 +24,7 @@ def test_run_orchestrates(monkeypatch):
         df = pd.DataFrame({"a": [1]})
         return df, df
 
-    def fake_segment(pdf, cfg, metrics=None):
+    def fake_segment(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
         called["segment"] = pdf
         return ["manifest"]
 
@@ -44,7 +44,11 @@ def test_run_orchestrates(monkeypatch):
         types.SimpleNamespace(normalize=fake_normalize),
     )
     monkeypatch.setattr(
-        pipeline, "pdf_segmenter", types.SimpleNamespace(segment=fake_segment)
+        pipeline,
+        "pdf_segmenter",
+        types.SimpleNamespace(
+            segment=fake_segment, create_services=lambda cfg: (None, None, None)
+        ),
     )
     monkeypatch.setattr(
         pipeline, "file_packager", types.SimpleNamespace(package=fake_package)
@@ -84,8 +88,13 @@ def test_run_uses_provided_cfg(monkeypatch):
             normalize=lambda y, c, metrics=None, template_path=None: (df, df)
         ),
     )
+    def seg(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
+        return {}
+
     monkeypatch.setattr(
-        pipeline, "pdf_segmenter", types.SimpleNamespace(segment=lambda p, c, metrics=None: {})
+        pipeline,
+        "pdf_segmenter",
+        types.SimpleNamespace(segment=seg, create_services=lambda cfg: (None, None, None)),
     )
     monkeypatch.setattr(
         pipeline,
@@ -120,11 +129,15 @@ def test_segment_failure_persists_df(monkeypatch, tmp_path):
         types.SimpleNamespace(normalize=lambda y, c, metrics=None, template_path=None: (df, df)),
     )
 
-    def fail_segment(pdf, cfg, metrics=None):
+    def fail_segment(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
-        pipeline, "pdf_segmenter", types.SimpleNamespace(segment=fail_segment)
+        pipeline,
+        "pdf_segmenter",
+        types.SimpleNamespace(
+            segment=fail_segment, create_services=lambda cfg: (None, None, None)
+        ),
     )
 
     args = types.SimpleNamespace(
@@ -171,12 +184,13 @@ def test_resume_skips_ai(monkeypatch, tmp_path):
             normalize=lambda y, c, metrics=None, template_path=None: called.setdefault("norm", True)
         ),
     )
+    def seg(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
+        return called.setdefault("seg", True)
+
     monkeypatch.setattr(
         pipeline,
         "pdf_segmenter",
-        types.SimpleNamespace(
-            segment=lambda p, c, metrics=None: called.setdefault("seg", True)
-        ),
+        types.SimpleNamespace(segment=seg, create_services=lambda cfg: (None, None, None)),
     )
     monkeypatch.setattr(
         pipeline,
