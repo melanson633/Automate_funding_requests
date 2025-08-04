@@ -73,10 +73,13 @@ python bin/process_advance.py \
   --yardi Expense_Report.xlsx DataGridExport.xlsx \
   --pdf Invoices.pdf \
   --lender example_lender \
-  --output data/output
+  --output data/output \
+  --use-vision
 ```
 
 Processed funding packages will be saved under the specified output directory.
+
+Pass `--use-vision` to enable Gemini 2.5 Vision for PDF segmentation; omit it to use the default text-only model.
 
 Dependencies
 	•	Python

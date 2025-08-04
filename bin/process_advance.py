@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cre_advance import pipeline
-from cre_advance.utils import get_logger
+from cre_advance.utils import get_config, get_logger
 
 
 class _Colour:
@@ -39,6 +39,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Resume using the latest staging files",
     )
+    parser.add_argument(
+        "--use-vision",
+        action="store_true",
+        help="Enable Gemini 2.5 Vision for PDF segmentation",
+    )
     return parser.parse_args()
 
 
@@ -62,7 +67,10 @@ def _print_summary(summary: dict) -> None:
 
 def main() -> None:
     args = _parse_args()
-    logger = get_logger(__name__)
+    cfg = get_config(args.lender)
+    cfg.setdefault("pdf", {})
+    cfg["pdf"]["use_vision"] = args.use_vision
+    logger = get_logger(__name__, cfg)
     if args.resume:
         staging = Path("data/staging")
         norm_files = sorted(staging.glob("normalized_*.xlsx"))
@@ -76,7 +84,7 @@ def main() -> None:
         args.normalized = None
         args.manifest = None
     try:
-        summary = pipeline.run(args)
+        summary = pipeline.run(args, cfg=cfg)
     except Exception as exc:  # noqa: BLE001
         logger.error("Pipeline failed: %s", exc)
         sys.exit(1)
