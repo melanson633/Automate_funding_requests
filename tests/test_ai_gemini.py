@@ -24,38 +24,30 @@ sys.modules.setdefault("google.genai.types", genai_types_mock)
 from cre_advance import ai_gemini  # noqa: E402
 
 
-def test_classify_pages(monkeypatch):
+def test_classify_page_and_detect_starts():
     pages = [
         "Invoice Register\nWorkflow Approval",
         "Invoice #123\nBill To",
         "From: Craig\nSent: yesterday",
+        "Invoice #999\nBill To",
     ]
-    fake_resp = [
-        {
-            "page_number": 1,
-            "category": "invoice_register",
-            "keep": False,
-            "confidence": 0.9,
-        },
-        {"page_number": 2, "category": "invoice", "keep": True, "confidence": 0.95},
-        {
-            "page_number": 3,
-            "category": "email_approval",
-            "keep": False,
-            "confidence": 0.8,
-        },
-    ]
-    monkeypatch.setattr(
-        ai_gemini,
-        "_request_json",
-        lambda prompt, schema, cfg, temperature=None: fake_resp,
-    )
 
-    out = ai_gemini.classify_pages(pages, {})
-    assert out == fake_resp
+    assert ai_gemini.classify_page(pages[0]) is False
+    assert ai_gemini.classify_page(pages[1]) is True
+    assert ai_gemini.classify_page(pages[2]) is False
+
+    starts = ai_gemini.detect_invoice_starts(pages)
+    assert starts == [1, 3]
 
 
-def test_request_json_raises_non_retryable(monkeypatch):
+def test_map_headers_basic():
+    headers = ["Date", "Amt"]
+    mapping = ai_gemini.map_headers(headers, [], ["Date", "Amount"])
+    assert mapping["Date"] == "Date"
+    assert mapping["Amt"] == "Amount"
+
+
+def test_invoke_model_raises_non_retryable(monkeypatch):
     class FakeRetryOptions:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -64,9 +56,7 @@ def test_request_json_raises_non_retryable(monkeypatch):
         def __init__(self, **kwargs):
             self.retry_options = kwargs.get("retry_options")
 
-    monkeypatch.setattr(
-        ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False
-    )
+    monkeypatch.setattr(ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False)
     monkeypatch.setattr(
         ai_gemini.types, "GenerateContentConfig", FakeGenConfig, raising=False
     )
@@ -82,4 +72,5 @@ def test_request_json_raises_non_retryable(monkeypatch):
     monkeypatch.setattr(ai_gemini, "_get_client", lambda cfg: FakeClient())
 
     with pytest.raises(google_exceptions.BadRequest):
-        ai_gemini._request_json("prompt", schema={}, cfg={})
+        ai_gemini._invoke_model("prompt", cfg={})
+

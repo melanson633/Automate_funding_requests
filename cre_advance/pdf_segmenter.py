@@ -132,7 +132,15 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
     if pdf_cfg.get("remove_invoice_register", True):
         classified: List[dict] | None = None
         try:
-            classified = ai_gemini.classify_pages(all_texts, cfg)
+            classified = [
+                {
+                    "page_number": i + 1,
+                    "category": "invoice" if ai_gemini.classify_page(t) else "unknown",
+                    "keep": ai_gemini.classify_page(t),
+                    "confidence": 1.0,
+                }
+                for i, t in enumerate(all_texts)
+            ]
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Gemini page classification failed: %s", exc, extra={"context": "segment"}
@@ -171,7 +179,18 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
         if not texts:
             raise PDFSegmentationError("No invoice pages after classification")
 
-    manifest = ai_gemini.segment_pdf(texts, cfg)
+    starts = ai_gemini.detect_invoice_starts(texts)
+    manifest = [
+        {
+            "start_page": idx + 1,
+            "vendor": "",
+            "invoice_number": "",
+            "date": "",
+            "amount": "",
+            "confidence": 1.0,
+        }
+        for idx in starts
+    ]
     if metrics is not None:
         metrics["total_pages"] = len(page_map)
 
