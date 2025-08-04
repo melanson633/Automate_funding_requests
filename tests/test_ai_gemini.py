@@ -69,7 +69,7 @@ def test_map_headers_cached():
     assert second.hits == first.hits + 1
 
 
-def test_invoke_model_raises_non_retryable(monkeypatch):
+def test_invoke_model_configures_retry_and_tools(monkeypatch):
     class FakeRetryOptions:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -77,6 +77,7 @@ def test_invoke_model_raises_non_retryable(monkeypatch):
     class FakeGenConfig:
         def __init__(self, **kwargs):
             self.retry_options = kwargs.get("retry_options")
+            self.tools = kwargs.get("tools")
 
     monkeypatch.setattr(
         ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False
@@ -88,6 +89,11 @@ def test_invoke_model_raises_non_retryable(monkeypatch):
     class FakeModels:
         def generate_content(self, model, contents, config):
             assert isinstance(config.retry_options, FakeRetryOptions)
+            assert config.tools == [
+                ai_gemini.map_headers,
+                ai_gemini.classify_page,
+                ai_gemini.detect_invoice_starts,
+            ]
             raise google_exceptions.BadRequest("bad request")
 
     class FakeClient:
@@ -157,9 +163,22 @@ def test_stream_generate_content(monkeypatch):
         def __init__(self, text):
             self.text = text
 
+    class FakeGenConfig:
+        def __init__(self, **kwargs):
+            self.tools = kwargs.get("tools")
+
+    monkeypatch.setattr(
+        ai_gemini.types, "GenerateContentConfig", FakeGenConfig, raising=False
+    )
+
     class FakeModels:
         def generate_content(self, model, contents, config, stream):
             assert stream is True
+            assert config.tools == [
+                ai_gemini.map_headers,
+                ai_gemini.classify_page,
+                ai_gemini.detect_invoice_starts,
+            ]
             yield Chunk("a")
             yield Chunk("b")
 
@@ -172,7 +191,8 @@ def test_stream_generate_content(monkeypatch):
     assert result == "ab"
 
 
-def test_async_generate_content(monkeypatch):
+@pytest.mark.asyncio
+async def test_async_generate_content(monkeypatch):
     called = []
 
     def fake_invoke(prompt, cfg, temperature, tools):
@@ -193,8 +213,8 @@ def test_async_generate_content(monkeypatch):
     monkeypatch.setattr(ai_gemini, "_invoke_model", fake_invoke)
     monkeypatch.setattr(ai_gemini.asyncio, "to_thread", fake_to_thread)
 
-    res = asyncio.run(
-        ai_gemini.async_generate_content(["a", "b", "c"], {}, concurrency_limit=2)
+    res = await ai_gemini.async_generate_content(
+        ["a", "b", "c"], {}, concurrency_limit=2
     )
     assert res == ["resp:a", "resp:b", "resp:c"]
     assert counter["max"] <= 2
