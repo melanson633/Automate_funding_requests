@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Invoice segmentation and metadata extraction utilities."""
 
+import asyncio
 import re
 from datetime import datetime
 from typing import Dict, List
@@ -60,6 +61,14 @@ class InvoiceSegmenter:
         self._reconcile_with_log(manifest, cfg)
         return manifest
 
+    async def segment_invoices_async(
+        self, texts_list: List[List[str]], cfg: dict
+    ) -> List[List[dict]]:
+        tasks = [
+            asyncio.to_thread(self.segment_invoices, texts, cfg) for texts in texts_list
+        ]
+        return await asyncio.gather(*tasks)
+
     def _regex_extract_metadata(self, text: str) -> Dict[str, str]:
         """Extract metadata using simple regex heuristics."""
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -100,12 +109,7 @@ class InvoiceSegmenter:
         else:
             date_norm = date_raw
 
-        amt_raw = (
-            str(meta.get("amount", ""))
-            .replace(",", "")
-            .replace("$", "")
-            .strip()
-        )
+        amt_raw = str(meta.get("amount", "")).replace(",", "").replace("$", "").strip()
         amount = ""
         try:
             amount = f"{float(amt_raw):.2f}" if amt_raw else ""
@@ -128,10 +132,11 @@ class InvoiceSegmenter:
                     str(row.get("invoice_number", "")).strip().lower()
                     == item["invoice_number"].lower()
                 ):
-                    item["vendor"] = item["vendor"] or str(row.get("vendor", "")).strip()
+                    item["vendor"] = (
+                        item["vendor"] or str(row.get("vendor", "")).strip()
+                    )
                     item["date"] = item["date"] or str(row.get("date", "")).strip()
                     amount = str(row.get("amount", "")).strip()
                     if not item["amount"] and amount:
                         item["amount"] = amount
                     break
-

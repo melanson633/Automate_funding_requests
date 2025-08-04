@@ -106,6 +106,7 @@ Development Notes
 	•	Utilize Cursor IDE with predefined rules in .cursor/config.json for intelligent development assistance.
 
         •       Page filtering options: set `pdf.remove_invoice_register` to disable dropping of "Invoice Register" and email approval pages, and adjust confidence via `pdf.classification_confidence_threshold`.
+        •       Async processing: tune `concurrency_limit` and `batch_size` in `configs/defaults.yaml` for Gemini requests.
 
 Running Tests
     Execute the unit tests and style checks before committing:

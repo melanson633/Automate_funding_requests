@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 from pathlib import Path
 
-import pytest
 import google.api_core  # noqa: F401
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
 
@@ -78,3 +79,31 @@ def test_missing_metadata_reconciled(monkeypatch) -> None:
     assert manifest[0]["amount"] == "300.00"
     assert manifest[0]["date"] == ""
 
+
+def test_segment_invoices_async(monkeypatch) -> None:
+    seg = segmenters.InvoiceSegmenter()
+    calls: list[list[str]] = []
+
+    def fake_segment(self, texts, cfg):
+        calls.append(texts)
+        return [
+            {
+                "start_page": 1,
+                "end_page": 1,
+                "vendor": "",
+                "invoice_number": "",
+                "date": "",
+                "amount": "",
+                "confidence": 1.0,
+            }
+        ]
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(segmenters.InvoiceSegmenter, "segment_invoices", fake_segment)
+    monkeypatch.setattr(segmenters.asyncio, "to_thread", fake_to_thread)
+
+    res = asyncio.run(seg.segment_invoices_async([["a"], ["b"]], {}))
+    assert len(res) == 2
+    assert calls == [["a"], ["b"]]
