@@ -20,7 +20,7 @@ sys.modules.setdefault("google", google_mock)
 sys.modules.setdefault("google.genai", genai_mock)
 sys.modules.setdefault("google.genai.types", genai_types_mock)
 
-from cre_advance import pdf_segmenter  # noqa: E402
+from cre_advance import pdf_segmenter, segmenters  # noqa: E402
 
 
 class FakePage:
@@ -41,7 +41,7 @@ def test_segment_success(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
     monkeypatch.setattr(
-        pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
+        segmenters.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
 
     manifest = pdf_segmenter.segment(
@@ -58,7 +58,7 @@ def test_segment_low_conf(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
     monkeypatch.setattr(
-        pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
+        segmenters.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: False)
 
@@ -93,7 +93,7 @@ def test_page_text_uses_ocr(monkeypatch):
 def test_segment_fallback(monkeypatch):
     pages = [FakePage("A"), FakePage("B"), FakePage("C")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda t: [])
+    monkeypatch.setattr(segmenters.ai_gemini, "detect_invoice_starts", lambda t: [])
 
     manifest = pdf_segmenter.segment(
         "dummy.pdf", {"pdf": {}}, classifier=pdf_segmenter.HeuristicClassifier()
@@ -110,7 +110,7 @@ def test_low_conf_split(monkeypatch) -> None:
     pages = [FakePage("A"), FakePage("B")]
     monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
     monkeypatch.setattr(
-        pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
+        segmenters.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: False)
 
@@ -138,7 +138,7 @@ def test_segment_filters_pages(monkeypatch) -> None:
         called["texts"] = list(texts)
         return [0]
 
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", fake_detect)
+    monkeypatch.setattr(segmenters.ai_gemini, "detect_invoice_starts", fake_detect)
 
     manifest = pdf_segmenter.segment(
         "dummy.pdf", {"pdf": {}}, classifier=pdf_segmenter.HeuristicClassifier()
@@ -165,7 +165,7 @@ def test_segment_heuristic_fallback(monkeypatch) -> None:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(pdf_segmenter.ai_gemini, "classify_pages", fail_classify_pages)
-    monkeypatch.setattr(pdf_segmenter.ai_gemini, "detect_invoice_starts", fake_detect)
+    monkeypatch.setattr(segmenters.ai_gemini, "detect_invoice_starts", fake_detect)
 
     manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {}})
 
@@ -224,7 +224,7 @@ def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
 
     monkeypatch.setattr(pdf_segmenter, "_page_text", fake_page_text)
     monkeypatch.setattr(
-        pdf_segmenter.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
+        segmenters.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
     monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
 
