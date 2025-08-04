@@ -111,7 +111,10 @@ Development Notes
 Running Tests
     Execute the unit tests and style checks before committing:
     ```bash
-    pre-commit run --all-files  # if configured
+    pre-commit run --all-files
+    ruff check .
+    flake8 .
+    trufflehog --entropy=True --regex --json .
     pytest -q
     ```
 
