@@ -8,6 +8,7 @@ calling.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List
 
@@ -151,7 +152,9 @@ def _invoke_model(
     client = _get_client(cfg)
     model_name = cfg.get("gemini_model", _MODEL_NAME)
 
-    temp = temperature if temperature is not None else cfg.get("gemini_temperature", 0.1)
+    temp = (
+        temperature if temperature is not None else cfg.get("gemini_temperature", 0.1)
+    )
 
     retry_options = types.RetryOptions(
         max_retries=int(cfg.get("gemini_max_retries", _MAX_RETRIES)),
@@ -193,3 +196,89 @@ def _invoke_model(
         logger.error("Unexpected Gemini error: %s", exc)
         raise
 
+
+def invoke_multimodal(contents: List[Any], cfg: Dict[str, Any]) -> Any:
+    """Invoke Gemini with multimodal (text + image) content.
+
+    Args:
+        contents: List of text strings and ``Part`` objects comprising the
+            request.
+        cfg: Configuration dictionary.
+
+    Returns:
+        Text extracted from the Gemini response when available.
+
+    Raises:
+        google_exceptions.BadRequest: If the request is malformed.
+        google_exceptions.GoogleAPIError: For underlying API errors.
+        Exception: For any other unexpected errors.
+    """
+    cfg = cfg or {}
+    client = _get_client(cfg)
+    model_name = cfg.get("pdf", {}).get("vision_model", "gemini-2.5-pro")
+
+    try:
+        logger.debug("Gemini multimodal contents: %s", contents)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            stream=False,
+        )
+        logger.debug("Gemini multimodal response: %s", response)
+        if getattr(response, "text", None):
+            return response.text
+        candidates = getattr(response, "candidates", None)
+        if candidates:
+            first = candidates[0]
+            if getattr(first, "text", None):
+                return first.text
+        return response
+    except google_exceptions.BadRequest as exc:
+        logger.error("Gemini bad request: %s", exc)
+        raise
+    except google_exceptions.GoogleAPIError as exc:
+        logger.error("Gemini API error: %s", exc)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Unexpected Gemini error: %s", exc)
+        raise
+
+
+def parse_manifest_response(response_text: str) -> List[dict]:
+    """Parse manifest extraction response from Gemini.
+
+    Args:
+        response_text: Raw JSON string returned by Gemini.
+
+    Returns:
+        A list of manifest dictionaries with required keys.
+
+    Raises:
+        ValueError: If the response is not valid JSON or missing keys.
+    """
+    logger.debug("Parsing manifest response: %s", response_text)
+    try:
+        data = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        logger.error("Invalid manifest JSON: %s", exc)
+        raise ValueError("Manifest response is not valid JSON") from exc
+
+    if not isinstance(data, list):
+        logger.error("Manifest JSON is not an array: %s", data)
+        raise ValueError("Manifest response must be a JSON array")
+
+    required = {
+        "start_page",
+        "vendor",
+        "invoice_number",
+        "date",
+        "amount",
+        "confidence",
+    }
+    for item in data:
+        if not isinstance(item, dict) or required - item.keys():
+            logger.error("Manifest item missing keys: %s", item)
+            raise ValueError(
+                "Each manifest item must contain keys: start_page, vendor, invoice_number, date, amount, confidence"
+            )
+    return data

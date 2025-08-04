@@ -56,7 +56,9 @@ def test_invoke_model_raises_non_retryable(monkeypatch):
         def __init__(self, **kwargs):
             self.retry_options = kwargs.get("retry_options")
 
-    monkeypatch.setattr(ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False)
+    monkeypatch.setattr(
+        ai_gemini.types, "RetryOptions", FakeRetryOptions, raising=False
+    )
     monkeypatch.setattr(
         ai_gemini.types, "GenerateContentConfig", FakeGenConfig, raising=False
     )
@@ -74,3 +76,55 @@ def test_invoke_model_raises_non_retryable(monkeypatch):
     with pytest.raises(google_exceptions.BadRequest):
         ai_gemini._invoke_model("prompt", cfg={})
 
+
+def test_invoke_multimodal_text(monkeypatch):
+    class FakeResp:
+        text = "result"
+        candidates = []
+
+    class FakeModels:
+        def generate_content(self, model, contents, stream):
+            assert model == "gemini-2.5-pro"
+            assert contents == ["a"]
+            assert stream is False
+            return FakeResp()
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(ai_gemini, "_get_client", lambda cfg: FakeClient())
+
+    result = ai_gemini.invoke_multimodal(["a"], cfg={})
+    assert result == "result"
+
+
+def test_invoke_multimodal_candidate(monkeypatch):
+    class FakeResp:
+        text = None
+        candidates = [types.SimpleNamespace(text="alt")]
+
+    class FakeModels:
+        def generate_content(self, model, contents, stream):
+            return FakeResp()
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr(ai_gemini, "_get_client", lambda cfg: FakeClient())
+
+    result = ai_gemini.invoke_multimodal([], cfg={})
+    assert result == "alt"
+
+
+def test_parse_manifest_response_success():
+    raw = (
+        '[{"start_page":1,"vendor":"V","invoice_number":"INV",'
+        '"date":"2024-01-01","amount":10.0,"confidence":0.9}]'
+    )
+    parsed = ai_gemini.parse_manifest_response(raw)
+    assert parsed[0]["vendor"] == "V"
+
+
+def test_parse_manifest_response_invalid():
+    with pytest.raises(ValueError):
+        ai_gemini.parse_manifest_response("not json")
