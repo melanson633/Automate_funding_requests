@@ -97,6 +97,31 @@ def classify_page(text: str) -> bool:
     return any(token in lowered for token in indicators)
 
 
+def classify_pages(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    """Classify a batch of pages.
+
+    Args:
+        pages: Text for each page in order.
+        cfg: Configuration dictionary (unused).
+
+    Returns:
+        List of classification dictionaries with ``page_number``, ``category``,
+        ``keep`` and ``confidence`` keys.
+    """
+    results: List[Dict[str, Any]] = []
+    for idx, text in enumerate(pages, start=1):
+        keep = classify_page(text)
+        results.append(
+            {
+                "page_number": idx,
+                "category": "invoice" if keep else "unknown",
+                "keep": keep,
+                "confidence": 1.0,
+            }
+        )
+    return results
+
+
 def detect_invoice_starts(pages: List[str]) -> List[int]:
     """Detect start indices of invoices within a sequence of pages.
 

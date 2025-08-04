@@ -12,7 +12,7 @@ from PIL import Image
 from pypdf import PdfReader
 
 from . import ai_gemini
-from .classifiers import HeuristicClassifier
+from .classifiers import GeminiClassifier, HeuristicClassifier, PageClassifier
 from .utils.errors import PDFSegmentationError
 from .utils.logging import get_logger
 
@@ -162,8 +162,20 @@ def _finalize(
     return manifest
 
 
-def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> List[dict]:
-    """Return invoice manifest with page ranges for ``pdf_path``."""
+def segment(
+    pdf_path: str | Path,
+    cfg: dict,
+    metrics: dict | None = None,
+    classifier: PageClassifier | None = None,
+) -> List[dict]:
+    """Return invoice manifest with page ranges for ``pdf_path``.
+
+    Args:
+        pdf_path: Path to source PDF.
+        cfg: Configuration dictionary.
+        metrics: Optional metrics dictionary.
+        classifier: Page classifier instance. Defaults to ``GeminiClassifier``.
+    """
     logger.info("Starting PDF segmentation", extra={"context": "segment"})
     pdf_cfg = cfg.get("pdf", {})
     use_vision = pdf_cfg.get("use_vision", False)
@@ -198,26 +210,17 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
 
     page_map = list(range(1, len(all_texts) + 1))
     texts = all_texts
+    classifier = classifier or GeminiClassifier()
 
     if pdf_cfg.get("remove_invoice_register", True):
         classified: List[dict] | None = None
         try:
-            classified = [
-                {
-                    "page_number": i + 1,
-                    "category": "invoice" if ai_gemini.classify_page(t) else "unknown",
-                    "keep": ai_gemini.classify_page(t),
-                    "confidence": 1.0,
-                }
-                for i, t in enumerate(all_texts)
-            ]
+            classified = classifier.classify(all_texts, cfg)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Gemini page classification failed: %s",
-                exc,
-                extra={"context": "segment"},
+                "Page classification error: %s", exc, extra={"context": "segment"}
             )
-        if not classified:
+        if not classified and not isinstance(classifier, HeuristicClassifier):
             logger.info(
                 "Falling back to heuristic page classification",
                 extra={"context": "segment"},
