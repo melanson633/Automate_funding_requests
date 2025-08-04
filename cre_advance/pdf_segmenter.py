@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from . import ai_gemini
 from .classifiers import GeminiClassifier, HeuristicClassifier, PageClassifier
+from .segmenters import InvoiceSegmenter
 from .utils.errors import PDFSegmentationError
 from .utils.logging import get_logger
 
@@ -167,6 +168,7 @@ def segment(
     cfg: dict,
     metrics: dict | None = None,
     classifier: PageClassifier | None = None,
+    segmenter: InvoiceSegmenter | None = None,
 ) -> List[dict]:
     """Return invoice manifest with page ranges for ``pdf_path``.
 
@@ -175,6 +177,7 @@ def segment(
         cfg: Configuration dictionary.
         metrics: Optional metrics dictionary.
         classifier: Page classifier instance. Defaults to ``GeminiClassifier``.
+        segmenter: Invoice segmenter instance. Defaults to ``InvoiceSegmenter``.
     """
     logger.info("Starting PDF segmentation", extra={"context": "segment"})
     pdf_cfg = cfg.get("pdf", {})
@@ -211,6 +214,7 @@ def segment(
     page_map = list(range(1, len(all_texts) + 1))
     texts = all_texts
     classifier = classifier or GeminiClassifier()
+    segmenter = segmenter or InvoiceSegmenter()
 
     if pdf_cfg.get("remove_invoice_register", True):
         classified: List[dict] | None = None
@@ -256,17 +260,5 @@ def segment(
         if not texts:
             raise PDFSegmentationError("No invoice pages after classification")
 
-    starts = ai_gemini.detect_invoice_starts(texts)
-    manifest = [
-        {
-            "start_page": idx + 1,
-            "vendor": "",
-            "invoice_number": "",
-            "date": "",
-            "amount": "",
-            "confidence": 1.0,
-        }
-        for idx in starts
-    ]
-
+    manifest = segmenter.segment_invoices(texts, cfg)
     return _finalize(manifest, page_map, cfg, metrics)

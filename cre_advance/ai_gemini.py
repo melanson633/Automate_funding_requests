@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import datetime
 from typing import Any, Dict, List
 
 from google import genai
@@ -120,6 +122,65 @@ def classify_pages(pages: List[str], cfg: Dict[str, Any] | None = None) -> List[
             }
         )
     return results
+
+
+def extract_metadata(text: str) -> Dict[str, str]:
+    """Extract basic invoice metadata from ``text``.
+
+    This heuristic function enables local execution and serves as a
+    fallback when the Gemini model is unavailable. It looks for common
+    patterns representing vendor name, invoice number, invoice date, and
+    amount.
+
+    Args:
+        text: Full text of an invoice, potentially spanning multiple pages.
+
+    Returns:
+        Dictionary containing ``vendor``, ``invoice_number``, ``date`` and
+        ``amount`` keys. Missing values are returned as empty strings.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    vendor = ""
+    if lines and "invoice" not in lines[0].lower():
+        vendor = lines[0]
+
+    inv_match = re.search(
+        r"invoice\s*(?:number|no\.|#)?\s*[:#]?\s*([A-Za-z0-9-]+)",
+        text,
+        re.IGNORECASE,
+    )
+    date_match = re.search(
+        r"(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+        text,
+    )
+    amt_match = re.search(r"\$?\s*([0-9][0-9,]*\.\d{2})", text)
+
+    date = ""
+    if date_match:
+        raw = date_match.group(1)
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+            try:
+                date = datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        else:
+            date = raw
+
+    amount = ""
+    if amt_match:
+        raw_amt = amt_match.group(1).replace(",", "")
+        try:
+            amount = f"{float(raw_amt):.2f}"
+        except ValueError:
+            amount = raw_amt
+
+    return {
+        "vendor": vendor,
+        "invoice_number": inv_match.group(1) if inv_match else "",
+        "date": date,
+        "amount": amount,
+    }
 
 
 def detect_invoice_starts(pages: List[str]) -> List[int]:
