@@ -40,11 +40,32 @@ def test_classify_page_and_detect_starts():
     assert starts == [1, 3]
 
 
+def test_classify_page_cached():
+    ai_gemini.classify_page.cache_clear()
+    text = "Invoice #123\nBill To"
+    ai_gemini.classify_page(text)
+    first = ai_gemini.classify_page.cache_info()
+    ai_gemini.classify_page(text)
+    second = ai_gemini.classify_page.cache_info()
+    assert second.hits == first.hits + 1
+
+
 def test_map_headers_basic():
     headers = ["Date", "Amt"]
     mapping = ai_gemini.map_headers(headers, [], ["Date", "Amount"])
     assert mapping["Date"] == "Date"
     assert mapping["Amt"] == "Amount"
+
+
+def test_map_headers_cached():
+    ai_gemini.map_headers.cache_clear()
+    headers = ["Date", "Amt"]
+    targets = ["Date", "Amount"]
+    ai_gemini.map_headers(headers, [], targets)
+    first = ai_gemini.map_headers.cache_info()
+    ai_gemini.map_headers(headers, [], targets)
+    second = ai_gemini.map_headers.cache_info()
+    assert second.hits == first.hits + 1
 
 
 def test_invoke_model_raises_non_retryable(monkeypatch):
