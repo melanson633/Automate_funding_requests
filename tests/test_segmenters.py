@@ -107,3 +107,36 @@ def test_segment_invoices_async(monkeypatch) -> None:
     res = asyncio.run(seg.segment_invoices_async([["a"], ["b"]], {}))
     assert len(res) == 2
     assert calls == [["a"], ["b"]]
+
+
+def test_segment_invoices_async_with_metadata(monkeypatch) -> None:
+    """Async segmentation produces full manifests."""
+    seg = segmenters.InvoiceSegmenter()
+
+    monkeypatch.setattr(segmenters.ai_gemini, "detect_invoice_starts", lambda t: [0])
+
+    def fake_extract(text: str) -> dict:
+        if "Vendor A" in text:
+            return {
+                "vendor": "Vendor A",
+                "invoice_number": "1001",
+                "date": "2024-01-01",
+                "amount": "10.00",
+            }
+        return {
+            "vendor": "Vendor B",
+            "invoice_number": "2002",
+            "date": "2024-02-01",
+            "amount": "20.00",
+        }
+
+    monkeypatch.setattr(segmenters.ai_gemini, "extract_metadata", fake_extract)
+
+    texts_list = [
+        ["Vendor A\nInvoice #1001\nTotal $10.00"],
+        ["Vendor B\nInvoice #2002\nTotal $20.00"],
+    ]
+
+    res = asyncio.run(seg.segment_invoices_async(texts_list, {}))
+    assert res[0][0]["invoice_number"] == "1001"
+    assert res[1][0]["vendor"] == "Vendor B"
