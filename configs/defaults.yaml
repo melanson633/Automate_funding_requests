@@ -15,3 +15,8 @@ packager:
 pdf:
   remove_invoice_register: true
   classification_confidence_threshold: 0.5
+ocr:
+  langs: eng
+  psm: 6
+  oem: 1
+  deskew: false

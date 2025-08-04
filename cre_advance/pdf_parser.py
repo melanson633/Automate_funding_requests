@@ -66,7 +66,14 @@ class PDFDocument:
         tesseract_cmd = ocr_cfg.get("tesseract_cmd")
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-        langs = "+".join(ocr_cfg.get("langs", []))
+        langs_cfg = ocr_cfg.get("langs", [])
+        if isinstance(langs_cfg, (list, tuple)):
+            langs = "+".join(langs_cfg)
+        else:
+            langs = langs_cfg
+        psm = ocr_cfg.get("psm")
+        oem = ocr_cfg.get("oem")
+        config_str = f"--psm {psm} --oem {oem}".strip()
         for page_num, page in enumerate(self.doc, start=1):
             text = (page.get_text("text") or "").strip()
             if not text:
@@ -75,6 +82,8 @@ class PDFDocument:
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 if ocr_cfg.get("deskew"):
                     img = _deskew_image(img, cfg)
-                text = pytesseract.image_to_string(img, lang=langs)
+                text = pytesseract.image_to_string(
+                    img, lang=langs, config=config_str
+                )
             texts.append(text)
         return texts

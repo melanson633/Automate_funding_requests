@@ -109,4 +109,12 @@ def get_config(lender: str) -> dict:
         if key not in config:
             raise ConfigError(f"Missing required config key: {key}")
 
+    # Normalise OCR configuration
+    ocr_cfg = config.setdefault("ocr", {})
+    langs = ocr_cfg.get("langs", [])
+    if isinstance(langs, str):
+        ocr_cfg["langs"] = [lang.strip() for lang in langs.split(",") if lang.strip()]
+    ocr_cfg["psm"] = int(ocr_cfg.get("psm", 6))
+    ocr_cfg["oem"] = int(ocr_cfg.get("oem", 1))
+
     return config
