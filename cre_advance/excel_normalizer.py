@@ -111,7 +111,7 @@ def normalize(
 
     # Try AI mapping first, fallback to manual mapping if it fails
     manual_mapping = excel_cfg.get("manual_mapping", {})
-    mapping = ai_gemini.map_schema(headers, samples, target_fields, cfg)
+    mapping = ai_gemini.map_headers(headers, samples, target_fields)
     
     # If AI mapping failed, use manual mapping
     if not mapping and manual_mapping:
@@ -126,7 +126,7 @@ def normalize(
     mapping_threshold = float(cfg.get("mapping_coverage_threshold", 0.6))
     if coverage < mapping_threshold or excel_cfg.get("force_schema_builder"):
         logger.info("Generating schema via Gemini", extra={"context": "normalize"})
-        proposal = ai_gemini.build_schema(headers, samples, cfg)
+        proposal = ai_gemini.build_schema(headers, samples)
         mapping = proposal.get("mapping", {})
         if proposal:
             lender = cfg.get("lender", "unknown")

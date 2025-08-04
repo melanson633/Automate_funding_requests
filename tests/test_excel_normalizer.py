@@ -41,15 +41,15 @@ def test_normalize_basic(monkeypatch) -> None:
         excel_path = Path(tmp) / "test.xlsx"
         _create_workbook(excel_path)
 
-        def fake_map(headers, samples, fields, cfg=None):
+        def fake_map(headers, samples, fields):
             return {"Date": "Date", "Amount": "Amount"}
 
-        def fake_build(headers, samples, cfg=None):
+        def fake_build(headers, samples):
             return {}
 
         monkeypatch.setattr(
             excel_normalizer.ai_gemini,
-            "map_schema",
+            "map_headers",
             fake_map,
         )
         monkeypatch.setattr(
@@ -77,11 +77,11 @@ def test_header_row_config(monkeypatch) -> None:
 
         monkeypatch.setattr(
             excel_normalizer.ai_gemini,
-            "map_schema",
-            lambda h, s, f, cfg=None: {"Date": "Date", "Amount": "Amount"},
+            "map_headers",
+            lambda h, s, f: {"Date": "Date", "Amount": "Amount"},
         )
         monkeypatch.setattr(
-            excel_normalizer.ai_gemini, "build_schema", lambda h, s, cfg=None: {}
+            excel_normalizer.ai_gemini, "build_schema", lambda h, s: {}
         )
 
         cfg = {"lender": "x", "excel": {"fields": ["Date", "Amount"], "header_row": 3}}
@@ -96,14 +96,14 @@ def test_auto_save_schema(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr(
         excel_normalizer.ai_gemini,
-        "map_schema",
-        lambda h, s, f, cfg=None: {},
+        "map_headers",
+        lambda h, s, f: {},
     )
 
     monkeypatch.setattr(
         excel_normalizer.ai_gemini,
         "build_schema",
-        lambda h, s, cfg=None: {
+        lambda h, s: {
             "mapping": {"Date": "InvoiceDate"},
             "fields": ["InvoiceDate"],
         },
@@ -142,11 +142,11 @@ def test_fuzzy_fallback(monkeypatch) -> None:
 
         monkeypatch.setattr(
             excel_normalizer.ai_gemini,
-            "map_schema",
-            lambda h, s, f, cfg=None: {},
+            "map_headers",
+            lambda h, s, f: {},
         )
         monkeypatch.setattr(
-            excel_normalizer.ai_gemini, "build_schema", lambda h, s, cfg=None: {}
+            excel_normalizer.ai_gemini, "build_schema", lambda h, s: {}
         )
 
         cfg = {
