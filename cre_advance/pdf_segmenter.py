@@ -12,6 +12,7 @@ from PIL import Image
 from pypdf import PdfReader
 
 from . import ai_gemini
+from .classifiers import HeuristicClassifier
 from .utils.errors import PDFSegmentationError
 from .utils.logging import get_logger
 
@@ -81,42 +82,6 @@ def _validate(
     ):
         return False
     return True
-
-
-def _heuristic_classify(pages: List[str]) -> List[dict]:
-    """Heuristically classify pages without Gemini."""
-    results: List[dict] = []
-    for idx, text in enumerate(pages, start=1):
-        lower = text.lower()
-        if "invoice register" in lower and "workflow approval" in lower:
-            results.append(
-                {
-                    "page_number": idx,
-                    "category": "invoice_register",
-                    "keep": False,
-                    "confidence": 1.0,
-                }
-            )
-        elif "from:" in lower and ("sent:" in lower or "subject:" in lower):
-            results.append(
-                {
-                    "page_number": idx,
-                    "category": "email_approval",
-                    "keep": False,
-                    "confidence": 1.0,
-                }
-            )
-        else:
-            results.append(
-                {
-                    "page_number": idx,
-                    "category": "unknown",
-                    "keep": True,
-                    "confidence": 1.0,
-                }
-            )
-    return results
-
 
 def _finalize(
     manifest: List[dict],
@@ -257,7 +222,7 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
                 "Falling back to heuristic page classification",
                 extra={"context": "segment"},
             )
-            classified = _heuristic_classify(all_texts)
+            classified = HeuristicClassifier().classify(all_texts, cfg)
         if not classified:
             raise PDFSegmentationError("Page classification failed")
 
