@@ -70,6 +70,46 @@ def test_run_orchestrates(monkeypatch):
     assert summary["excel"] == "x.xlsx"
 
 
+def test_run_uses_provided_cfg(monkeypatch):
+    df = pd.DataFrame({"a": [1]})
+
+    def raise_get_config(lender):  # pragma: no cover - should not be called
+        raise RuntimeError("get_config called")
+
+    monkeypatch.setattr(pipeline, "get_config", raise_get_config)
+    monkeypatch.setattr(
+        pipeline,
+        "excel_normalizer",
+        types.SimpleNamespace(
+            normalize=lambda y, c, metrics=None, template_path=None: (df, df)
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline, "pdf_segmenter", types.SimpleNamespace(segment=lambda p, c, metrics=None: {})
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "file_packager",
+        types.SimpleNamespace(package=lambda *a, metrics=None, **k: {"excel": "x"}),
+    )
+
+    args = types.SimpleNamespace(
+        excel="t.xlsx",
+        yardi=["y.xlsx"],
+        pdf="p.pdf",
+        lender="l",
+        output="out",
+        resume=False,
+        normalized=None,
+        manifest=None,
+    )
+    cfg = {"pdf": {"use_vision": True}}
+
+    summary = pipeline.run(args, cfg=cfg)
+
+    assert summary["excel"] == "x"
+
+
 def test_segment_failure_persists_df(monkeypatch, tmp_path):
     df = pd.DataFrame({"a": [1]})
 

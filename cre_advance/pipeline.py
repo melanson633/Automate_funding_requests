@@ -7,7 +7,7 @@ import time
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -17,7 +17,7 @@ from .utils import get_config, get_logger
 logger = get_logger(__name__)
 
 
-def run(args: Namespace) -> Dict[str, Any]:
+def run(args: Namespace, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Run the normalization, segmentation and packaging phases.
 
     Parameters
@@ -32,8 +32,11 @@ def run(args: Namespace) -> Dict[str, Any]:
         Mapping of artefact types to their output paths.
     """
     global logger
-    logger.info("Loading configuration for lender '%s'", args.lender)
-    cfg = get_config(args.lender)
+    if cfg is None:
+        logger.info("Loading configuration for lender '%s'", args.lender)
+        cfg = get_config(args.lender)
+    else:
+        logger.info("Using provided configuration for lender '%s'", args.lender)
     logger = get_logger(__name__, cfg)
 
     staging_dir = Path("data/staging")
