@@ -328,3 +328,32 @@ def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
     assert manifest[0]["start_page"] == 1 and manifest[1]["start_page"] == 2
     assert metrics["fallback_used"] == "none"
 
+
+def test_regex_fallback_manifest(monkeypatch) -> None:
+    """Metadata is extracted via regex when Gemini fails."""
+    pages = [
+        FakePage("Acme Corp\nInvoice #123\n01/15/2024\nTotal $9.99"),
+    ]
+    monkeypatch.setattr(pdf_segmenter, "PdfReader", lambda p: FakeReader(pages))
+    monkeypatch.setattr(segmenters.ai_gemini, "detect_invoice_starts", lambda t: [0])
+
+    def fail_extract(text: str) -> dict:  # noqa: ANN001
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(segmenters.ai_gemini, "extract_metadata", fail_extract)
+
+    manifest = pdf_segmenter.segment(
+        "dummy.pdf",
+        {"pdf": {}},
+        classifier=pdf_segmenter.HeuristicClassifier(),
+    )
+
+    item = manifest[0]
+    assert item["vendor"] == "Acme Corp"
+    assert item["invoice_number"] == "123"
+    assert item["date"] == "2024-01-15"
+    assert item["amount"] == "9.99"
+
+    metrics: dict = {}
+    assert pdf_segmenter.Manifest(manifest).validate(len(pages), {"pdf": {}}, metrics)
+
