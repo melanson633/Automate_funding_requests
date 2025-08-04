@@ -15,6 +15,30 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+class ContextFormatter(logging.Formatter):
+    """Formatter that renders mapping contexts as ``key=value`` pairs."""
+
+    def format(self, record: logging.LogRecord) -> str:  # noqa: D401 - standard override
+        ctx = getattr(record, "context", "")
+        if isinstance(ctx, dict):
+            record.context = ",".join(f"{k}={v}" for k, v in ctx.items())
+        elif not hasattr(record, "context"):
+            record.context = ""
+        return super().format(record)
+
+
+class ContextAdapter(logging.LoggerAdapter):
+    """LoggerAdapter that merges per-call context tags."""
+
+    def process(self, msg, kwargs):  # noqa: D401 - standard override
+        extra = kwargs.get("extra", {})
+        merged = {**self.extra}
+        if extra:
+            merged.update(extra)
+        kwargs["extra"] = merged
+        return msg, kwargs
+
+
 def _level_from_cfg(cfg: Dict[str, Any] | None = None) -> int:
     """Return logging level from ``cfg`` or environment."""
 
@@ -39,8 +63,8 @@ def get_logger(
             handler.setLevel(level)
     else:
         logger.setLevel(level)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(context)s - %(message)s"
+        formatter = ContextFormatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(context)s - %(message)s",
         )
 
         console = logging.StreamHandler()
@@ -60,5 +84,8 @@ def get_logger(
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    adapter = logging.LoggerAdapter(logger, extra={"context": context or ""})
+    base_extra: Dict[str, Any] = {}
+    if context:
+        base_extra["context"] = context
+    adapter = ContextAdapter(logger, extra=base_extra)
     return adapter
