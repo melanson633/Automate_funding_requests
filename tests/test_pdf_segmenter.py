@@ -103,7 +103,8 @@ def test_page_text_uses_ocr(monkeypatch):
 
     monkeypatch.setattr(pdf_segmenter.pytesseract, "image_to_string", fake_ocr)
 
-    text, used_ocr = pdf_segmenter._page_text(page, {"tesseract_cmd": None})
+    ocr = pdf_segmenter.OCRService()
+    text, used_ocr = ocr.extract(page)
 
     assert text.strip() == "hello"
     assert used_ocr
@@ -136,7 +137,7 @@ def test_single_page_fallback(monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(pdf_segmenter, "_validate", lambda *a, **k: False)
+    monkeypatch.setattr(pdf_segmenter.Manifest, "validate", lambda self, *a, **k: False)
 
     metrics = {}
     manifest = pdf_segmenter.segment(
@@ -241,12 +242,12 @@ def test_heuristic_classifier_fallback(monkeypatch) -> None:
             for i in range(len(texts))
         ]
 
-    def fake_validate(manifest, total, cfg, metrics=None):
+    def fake_validate(self, total, cfg, metrics=None):
         calls["validate"] += 1
         return calls["validate"] >= 3
 
     monkeypatch.setattr(pdf_segmenter.HeuristicClassifier, "classify", heuristic_classify)
-    monkeypatch.setattr(pdf_segmenter, "_validate", fake_validate)
+    monkeypatch.setattr(pdf_segmenter.Manifest, "validate", fake_validate)
 
     metrics = {}
     manifest = pdf_segmenter.segment("dummy.pdf", {"pdf": {}}, metrics=metrics)
@@ -276,11 +277,11 @@ def test_segment_vision_bypasses_ocr(monkeypatch) -> None:
 
     monkeypatch.setattr(vs, "segment", lambda *a, **k: fake_manifest)
     monkeypatch.setattr(
-        pdf_segmenter,
-        "_page_text",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("OCR called")),
+        pdf_segmenter.OCRService,
+        "extract",
+        lambda self, *a, **k: (_ for _ in ()).throw(AssertionError("OCR called")),
     )
-    monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
+    monkeypatch.setattr(pdf_segmenter.Manifest, "validate", lambda self, *a, **k: True)
 
     metrics = {}
     manifest = pdf_segmenter.segment(
@@ -304,15 +305,15 @@ def test_segment_vision_none_falls_back_to_ocr(monkeypatch) -> None:
 
     calls = {"count": 0}
 
-    def fake_page_text(page, cfg):
+    def fake_extract(self, page):
         calls["count"] += 1
         return "text", False
 
-    monkeypatch.setattr(pdf_segmenter, "_page_text", fake_page_text)
+    monkeypatch.setattr(pdf_segmenter.OCRService, "extract", fake_extract)
     monkeypatch.setattr(
         segmenters.ai_gemini, "detect_invoice_starts", lambda texts: [0, 1]
     )
-    monkeypatch.setattr(pdf_segmenter, "_validate", lambda m, t, c, metrics=None: True)
+    monkeypatch.setattr(pdf_segmenter.Manifest, "validate", lambda self, *a, **k: True)
 
     metrics = {}
     manifest = pdf_segmenter.segment(
