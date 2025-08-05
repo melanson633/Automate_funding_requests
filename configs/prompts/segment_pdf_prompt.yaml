@@ -1,0 +1,3 @@
+template: |
+  Identify each invoice's start page and extract vendor name, invoice number, date, and amount.
+  Return a JSON array of objects: start_page, vendor, invoice_number, date, amount, confidence.

@@ -146,4 +146,17 @@ def get_config(lender: str) -> dict:
     ocr_cfg["oem"] = int(ocr_cfg.get("oem", 1))
     ocr_cfg["deskew"] = bool(ocr_cfg.get("deskew", False))
 
+    # Normalise prompts configuration
+    prompts_cfg = config.setdefault("prompts", {})
+    for key, value in list(prompts_cfg.items()):
+        path = Path(value)
+        if not path.is_absolute():
+            path = project_root / path
+        prompts_cfg[key] = str(path)
+
+    # Normalise scoring configuration
+    scoring_cfg = config.setdefault("scoring", {})
+    for key, value in list(scoring_cfg.items()):
+        scoring_cfg[key] = float(value)
+
     return config

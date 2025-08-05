@@ -13,9 +13,13 @@ import json
 import os
 import re
 import types as pytypes
+from pathlib import Path
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List
+
+import yaml
+from jinja2 import Template
 
 try:  # pragma: no cover - import guard for tests
     from google import genai
@@ -306,24 +310,63 @@ def build_schema(
     return {"fields": list(mapping.values()), "mapping": mapping}
 
 
+def load_prompt(
+    name: str,
+    cfg: Dict[str, Any],
+    parts: List[Any] | None = None,
+    **kwargs: Any,
+) -> List[Dict[str, Any]]:
+    """Load and render a prompt template as Gemini messages."""
+
+    prompts_cfg = cfg.get("prompts", {})
+    project_root = Path(__file__).resolve().parents[1]
+
+    system_text = ""
+    system_path = prompts_cfg.get("system_instruction")
+    if system_path:
+        spath = Path(system_path)
+        if not spath.is_absolute():
+            spath = project_root / spath
+        try:
+            system_text = spath.read_text().strip()
+        except FileNotFoundError:
+            system_text = ""
+
+    template_path = prompts_cfg.get(name)
+    rendered = ""
+    if template_path:
+        tpath = Path(template_path)
+        if not tpath.is_absolute():
+            tpath = project_root / tpath
+        try:
+            with tpath.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            template = Template(data.get("template", ""))
+            rendered = template.render(**kwargs)
+        except FileNotFoundError:
+            rendered = ""
+    elif name == "classify_pages":
+        pages = kwargs.get("pages", [])
+        rendered = "\n---\n".join(pages)
+
+    user_parts: List[Any] = [rendered]
+    if parts:
+        user_parts.extend(parts)
+
+    return [
+        {"role": "system", "parts": [system_text]},
+        {"role": "user", "parts": user_parts},
+    ]
+
+
 def _invoke_model(
-    prompt: str,
+    contents: Any,
     cfg: Dict[str, Any] | None = None,
     temperature: float | None = None,
     tools: List[Any] | None = None,
 ) -> Any:
-    """Send a prompt to Gemini using automatic function calling.
+    """Send ``contents`` to Gemini using automatic function calling."""
 
-    Args:
-        prompt: Prompt text to send to the model.
-        cfg: Optional configuration dictionary.
-        temperature: Optional temperature override.
-        tools: Optional list of tool functions to expose to the model.
-
-    Returns:
-        The ``parsed`` field from the SDK response if available, otherwise
-        ``None``.
-    """
     cfg = cfg or {}
     client = _get_client(cfg)
     model_name = cfg.get("gemini_model", _MODEL_NAME)
@@ -352,17 +395,17 @@ def _invoke_model(
     )
 
     try:
-        logger.debug("Gemini prompt: %s", prompt)
+        logger.debug("Gemini prompt: %s", contents)
         resp = client.models.generate_content(
             model=model_name,
-            contents=prompt,
+            contents=contents,
             config=generation_config,
         )
         logger.debug("Gemini response: %s", resp)
         return getattr(resp, "parsed", None)
     except google_exceptions.BadRequest as exc:
         logger.error("Gemini bad request: %s", exc)
-        logger.error("Prompt: %s", prompt)
+        logger.error("Prompt: %s", contents)
         logger.error("Temperature: %s", temp)
         raise
     except google_exceptions.GoogleAPIError as exc:

@@ -1,0 +1,3 @@
+Responses must be valid JSON with no additional text.
+Use provided tools when necessary.
+Do not include code fences or explanations.

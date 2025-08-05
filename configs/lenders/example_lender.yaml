@@ -14,3 +14,7 @@ ocr:
   psm: 6
   oem: 1
   deskew: false
+prompts:
+  classify_pages: configs/prompts/classify_pages_override.yaml
+scoring:
+  classification_weight: 0.7

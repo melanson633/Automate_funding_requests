@@ -143,3 +143,28 @@ def test_packager_lender_overrides(monkeypatch):
         assert pkg["score_threshold"] == 1.0
     finally:
         cfg_path.unlink()
+
+
+def test_prompt_and_scoring_overrides(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    cfg = get_config("example_lender")
+    prompts = cfg["prompts"]
+    assert prompts["classify_pages"].endswith("classify_pages_override.yaml")
+    scoring = cfg["scoring"]
+    assert scoring["classification_weight"] == 0.7
+
+
+def test_prompt_and_scoring_defaults(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    lender_name = "temp_prompt_defaults"
+    lenders_dir = Path(__file__).resolve().parents[1] / "configs" / "lenders"
+    cfg_path = lenders_dir / f"{lender_name}.yaml"
+    cfg_path.write_text("\n")
+    try:
+        cfg = get_config(lender_name)
+        prompts = cfg["prompts"]
+        assert prompts["classify_pages"].endswith("classify_pages_prompt.yaml")
+        scoring = cfg["scoring"]
+        assert scoring["classification_weight"] == 1.0
+    finally:
+        cfg_path.unlink()

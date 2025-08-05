@@ -1,0 +1,8 @@
+template: |
+  Classify each page of text as either "invoice" or "unknown" and decide if it should be kept.
+  Return a JSON array of objects with keys: page_number, category, keep, confidence.
+  Pages:
+  {% for page in pages %}
+  Page {{ loop.index }}:
+  {{ page }}
+  {% endfor %}

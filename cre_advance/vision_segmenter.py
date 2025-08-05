@@ -39,14 +39,7 @@ def segment(pdf_path: str | Path, cfg: dict, metrics: dict | None = None) -> Lis
                     types.Part.from_bytes(data=png_bytes, mime_type="image/png")
                 )
 
-        prompt = (
-            "You are an accounts payable assistant. Given the following pages from a CRE "
-            "funding package (pages are 1-indexed), identify each invoice's starting page "
-            "and extract vendor name, invoice number, invoice date, and amount. Return a "
-            "JSON array with objects having start_page, vendor, invoice_number, date, "
-            "amount, confidence."
-        )
-        contents = [prompt, *parts]
+        contents = ai_gemini.load_prompt("segment_pdf", cfg, parts=parts)
 
         if metrics is not None:
             metrics["vision_pages"] = len(parts)

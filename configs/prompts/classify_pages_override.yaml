@@ -1,0 +1,5 @@
+template: |
+  OVERRIDE CLASSIFIER
+  {% for page in pages %}
+  {{ page }}
+  {% endfor %}
