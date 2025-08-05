@@ -31,7 +31,12 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help="Yardi Excel exports",
     )
-    parser.add_argument("--pdf", required=True, help="PDF of invoices")
+    parser.add_argument(
+        "--pdf",
+        nargs="+",
+        required=True,
+        help="PDF invoice files (one or many)",
+    )
     parser.add_argument("--lender", required=True, help="Lender config key")
     parser.add_argument("--output", required=True, help="Output directory")
     parser.add_argument(
@@ -44,7 +49,10 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable Gemini 2.5 Vision for PDF segmentation",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.pdf:
+        raise SystemExit("--pdf requires at least one PDF file")
+    return args
 
 
 def _print_summary(summary: dict) -> None:
