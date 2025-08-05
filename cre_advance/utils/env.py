@@ -109,12 +109,32 @@ def get_config(lender: str) -> dict:
         if key not in config:
             raise ConfigError(f"Missing required config key: {key}")
 
+    config["unmatched_threshold"] = float(config.get("unmatched_threshold", 0.4))
+    config["min_confidence"] = float(config.get("min_confidence", 0.0))
+
+    # Normalise packager configuration
+    pkg_cfg = config.setdefault("packager", {})
+    pkg_cfg["vendor_ratio_threshold"] = float(
+        pkg_cfg.get("vendor_ratio_threshold", 0.8)
+    )
+    pkg_cfg["amount_tolerance"] = float(pkg_cfg.get("amount_tolerance", 0.01))
+    pkg_cfg["score_threshold"] = float(pkg_cfg.get("score_threshold", 2.0))
+
     # Normalise PDF configuration
     pdf_cfg = config.setdefault("pdf", {})
     pdf_cfg.setdefault("use_vision", False)
     pdf_cfg.setdefault("vision_model", "gemini-2.5-pro")
     pdf_cfg["max_pages_per_request"] = int(
         pdf_cfg.get("max_pages_per_request", 3000)
+    )
+    pdf_cfg["classification_confidence_threshold"] = float(
+        pdf_cfg.get("classification_confidence_threshold", 0.5)
+    )
+    pdf_cfg["min_confidence"] = float(
+        pdf_cfg.get("min_confidence", config["min_confidence"])
+    )
+    pdf_cfg["unmatched_threshold"] = float(
+        pdf_cfg.get("unmatched_threshold", config["unmatched_threshold"])
     )
 
     # Normalise OCR configuration
@@ -124,5 +144,6 @@ def get_config(lender: str) -> dict:
         ocr_cfg["langs"] = [lang.strip() for lang in langs.split(",") if lang.strip()]
     ocr_cfg["psm"] = int(ocr_cfg.get("psm", 6))
     ocr_cfg["oem"] = int(ocr_cfg.get("oem", 1))
+    ocr_cfg["deskew"] = bool(ocr_cfg.get("deskew", False))
 
     return config

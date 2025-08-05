@@ -45,6 +45,41 @@ def test_match_invoices_order() -> None:
     assert unmatched_pdf == []
 
 
+def test_match_invoices_adjustable_scoring() -> None:
+    df = pd.DataFrame(
+        {
+            "invoice_number": [""],
+            "vendor": ["Acme Corp"],
+            "amount": [100.0],
+            "date": [""],
+        }
+    )
+    manifest = [
+        {
+            "invoice_number": "",
+            "vendor": "Acme Corporation",
+            "amount": 100.02,
+            "date": "",
+            "start_page": 1,
+            "end_page": 1,
+        }
+    ]
+
+    ordered, unmatched_rows, _ = file_packager._match_invoices(df, manifest)
+    assert unmatched_rows == [0]
+
+    cfg = {
+        "packager": {
+            "vendor_ratio_threshold": 0.7,
+            "amount_tolerance": 0.05,
+            "score_threshold": 1.0,
+        }
+    }
+    ordered2, unmatched_rows2, _ = file_packager._match_invoices(df, manifest, cfg)
+    assert unmatched_rows2 == []
+    assert [m["start_page"] for m in ordered2] == [1]
+
+
 def test_package_orders_pdf(monkeypatch, tmp_path):
     df = pd.DataFrame(
         {

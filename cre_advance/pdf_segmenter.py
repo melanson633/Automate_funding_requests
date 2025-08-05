@@ -3,6 +3,7 @@ from __future__ import annotations
 """PDF segmentation utilities."""
 
 import copy
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -31,6 +32,23 @@ class OCRService:
         cmd = self.cfg.get("tesseract_cmd")
         if cmd:
             pytesseract.pytesseract.tesseract_cmd = cmd
+        self.langs = "+".join(self.cfg.get("langs", ["eng"]))
+        self.psm = int(self.cfg.get("psm", 6))
+        self.oem = int(self.cfg.get("oem", 1))
+        self.deskew = bool(self.cfg.get("deskew", False))
+        self.tess_config = f"--psm {self.psm} --oem {self.oem}"
+
+    def _deskew_image(self, image: Image.Image) -> Image.Image:
+        if not self.deskew:
+            return image
+        try:
+            osd = pytesseract.image_to_osd(image)
+            rotate = int(re.search(r"Rotate: (\d+)", osd).group(1))
+            if rotate:
+                image = image.rotate(360 - rotate, expand=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Deskew failed: %s", exc, extra={"context": "segment"})
+        return image
 
     def extract(self, page: Any) -> tuple[str, bool]:
         """Return text for ``page`` and whether OCR was used."""
@@ -42,7 +60,14 @@ class OCRService:
         for img in page.images:
             try:
                 pil_img = img.image if hasattr(img, "image") else Image.open(img.data)
-                texts.append(pytesseract.image_to_string(pil_img, lang="eng"))
+                pil_img = self._deskew_image(pil_img)
+                try:
+                    text = pytesseract.image_to_string(
+                        pil_img, lang=self.langs, config=self.tess_config
+                    )
+                except TypeError:
+                    text = pytesseract.image_to_string(pil_img, lang=self.langs)
+                texts.append(text)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "OCR failed on image: %s", exc, extra={"context": "segment"}

@@ -59,6 +59,7 @@ def test_ocr_defaults_loaded(monkeypatch):
     assert ocr["langs"] == ["eng"]
     assert ocr["psm"] == 6
     assert ocr["oem"] == 1
+    assert ocr["deskew"] is False
 
 
 def test_pdf_defaults_loaded(monkeypatch):
@@ -68,6 +69,9 @@ def test_pdf_defaults_loaded(monkeypatch):
     assert pdf["use_vision"] is False
     assert pdf["vision_model"] == "gemini-2.5-pro"
     assert pdf["max_pages_per_request"] == 3000
+    assert pdf["classification_confidence_threshold"] == 0.5
+    assert pdf["min_confidence"] == 0.0
+    assert pdf["unmatched_threshold"] == 0.4
 
 
 def test_pdf_lender_overrides(monkeypatch):
@@ -80,6 +84,9 @@ def test_pdf_lender_overrides(monkeypatch):
         "  use_vision: true\n"
         "  vision_model: custom-model\n"
         "  max_pages_per_request: 10\n"
+        "  classification_confidence_threshold: 0.7\n"
+        "  min_confidence: 0.3\n"
+        "  unmatched_threshold: 0.2\n"
     )
     try:
         cfg = get_config(lender_name)
@@ -87,5 +94,52 @@ def test_pdf_lender_overrides(monkeypatch):
         assert pdf["use_vision"] is True
         assert pdf["vision_model"] == "custom-model"
         assert pdf["max_pages_per_request"] == 10
+        assert pdf["classification_confidence_threshold"] == 0.7
+        assert pdf["min_confidence"] == 0.3
+        assert pdf["unmatched_threshold"] == 0.2
+    finally:
+        cfg_path.unlink()
+
+
+def test_ocr_lender_overrides(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    lender_name = "temp_ocr_lender"
+    lenders_dir = Path(__file__).resolve().parents[1] / "configs" / "lenders"
+    cfg_path = lenders_dir / f"{lender_name}.yaml"
+    cfg_path.write_text(
+        "ocr:\n"
+        "  langs: spa,eng\n"
+        "  psm: 7\n"
+        "  oem: 3\n"
+        "  deskew: true\n"
+    )
+    try:
+        cfg = get_config(lender_name)
+        ocr = cfg["ocr"]
+        assert ocr["langs"] == ["spa", "eng"]
+        assert ocr["psm"] == 7
+        assert ocr["oem"] == 3
+        assert ocr["deskew"] is True
+    finally:
+        cfg_path.unlink()
+
+
+def test_packager_lender_overrides(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    lender_name = "temp_pkg_lender"
+    lenders_dir = Path(__file__).resolve().parents[1] / "configs" / "lenders"
+    cfg_path = lenders_dir / f"{lender_name}.yaml"
+    cfg_path.write_text(
+        "packager:\n"
+        "  vendor_ratio_threshold: 0.5\n"
+        "  amount_tolerance: 0.1\n"
+        "  score_threshold: 1.0\n"
+    )
+    try:
+        cfg = get_config(lender_name)
+        pkg = cfg["packager"]
+        assert pkg["vendor_ratio_threshold"] == 0.5
+        assert pkg["amount_tolerance"] == 0.1
+        assert pkg["score_threshold"] == 1.0
     finally:
         cfg_path.unlink()
