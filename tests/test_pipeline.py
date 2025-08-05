@@ -6,9 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pandas as pd
-import pytest
-import json
+import json  # noqa: E402
+
+import pandas as pd  # noqa: E402
+import pytest  # noqa: E402
+from pypdf import PdfWriter  # noqa: E402
+
 from cre_advance import pipeline  # noqa: E402
 
 
@@ -24,7 +27,9 @@ def test_run_orchestrates(monkeypatch):
         df = pd.DataFrame({"a": [1]})
         return df, df
 
-    def fake_segment(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
+    def fake_segment(
+        pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None
+    ):
         called["segment"] = pdf
         return ["manifest"]
 
@@ -88,13 +93,16 @@ def test_run_uses_provided_cfg(monkeypatch):
             normalize=lambda y, c, metrics=None, template_path=None: (df, df)
         ),
     )
+
     def seg(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
         return {}
 
     monkeypatch.setattr(
         pipeline,
         "pdf_segmenter",
-        types.SimpleNamespace(segment=seg, create_services=lambda cfg: (None, None, None)),
+        types.SimpleNamespace(
+            segment=seg, create_services=lambda cfg: (None, None, None)
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -122,14 +130,18 @@ def test_run_uses_provided_cfg(monkeypatch):
 def test_segment_failure_persists_df(monkeypatch, tmp_path):
     df = pd.DataFrame({"a": [1]})
 
-    monkeypatch.setattr(pipeline, "get_config", lambda l: {})
+    monkeypatch.setattr(pipeline, "get_config", lambda lender: {})
     monkeypatch.setattr(
         pipeline,
         "excel_normalizer",
-        types.SimpleNamespace(normalize=lambda y, c, metrics=None, template_path=None: (df, df)),
+        types.SimpleNamespace(
+            normalize=lambda y, c, metrics=None, template_path=None: (df, df)
+        ),
     )
 
-    def fail_segment(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
+    def fail_segment(
+        pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None
+    ):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(
@@ -176,21 +188,26 @@ def test_resume_skips_ai(monkeypatch, tmp_path):
 
     called = {}
 
-    monkeypatch.setattr(pipeline, "get_config", lambda l: {})
+    monkeypatch.setattr(pipeline, "get_config", lambda lender: {})
     monkeypatch.setattr(
         pipeline,
         "excel_normalizer",
         types.SimpleNamespace(
-            normalize=lambda y, c, metrics=None, template_path=None: called.setdefault("norm", True)
+            normalize=lambda y, c, metrics=None, template_path=None: called.setdefault(
+                "norm", True
+            )
         ),
     )
+
     def seg(pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None):
         return called.setdefault("seg", True)
 
     monkeypatch.setattr(
         pipeline,
         "pdf_segmenter",
-        types.SimpleNamespace(segment=seg, create_services=lambda cfg: (None, None, None)),
+        types.SimpleNamespace(
+            segment=seg, create_services=lambda cfg: (None, None, None)
+        ),
     )
     monkeypatch.setattr(
         pipeline,
@@ -213,3 +230,73 @@ def test_resume_skips_ai(monkeypatch, tmp_path):
 
     assert "norm" not in called and "seg" not in called
     assert summary["excel"] == "x"
+
+
+def test_merges_multiple_pdfs(monkeypatch, tmp_path):
+    called = {}
+
+    def fake_get_config(lender):
+        return {}
+
+    def fake_normalize(yardi, cfg, metrics=None, template_path=None):
+        return pd.DataFrame(), pd.DataFrame()
+
+    def fake_segment(
+        pdf, cfg, metrics=None, classifier=None, segmenter=None, ocr_service=None
+    ):
+        called["segment"] = pdf
+        return []
+
+    def fake_package(df, manifest, template, pdf, output, cfg, metrics=None):
+        return {
+            "excel": "x.xlsx",
+            "pdf": "p.pdf",
+            "report": "r.json",
+            "unmatched_rows": [],
+        }
+
+    monkeypatch.setattr(pipeline, "get_config", fake_get_config)
+    monkeypatch.setattr(
+        pipeline,
+        "excel_normalizer",
+        types.SimpleNamespace(normalize=fake_normalize),
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "pdf_segmenter",
+        types.SimpleNamespace(
+            segment=fake_segment, create_services=lambda cfg: (None, None, None)
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline, "file_packager", types.SimpleNamespace(package=fake_package)
+    )
+
+    pdf1 = tmp_path / "a.pdf"
+    pdf2 = tmp_path / "b.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with pdf1.open("wb") as fh:
+        writer.write(fh)
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with pdf2.open("wb") as fh:
+        writer.write(fh)
+
+    args = types.SimpleNamespace(
+        excel="template.xlsx",
+        yardi=["y.xlsx"],
+        pdf=[str(pdf1), str(pdf2)],
+        lender="l1",
+        output=tmp_path,
+        resume=False,
+        normalized=None,
+        manifest=None,
+    )
+
+    summary = pipeline.run(args)
+
+    merged_path = Path(called["segment"])
+    assert merged_path.name.startswith("merged_invoices_")
+    assert merged_path.exists()
+    assert "pdf_merge_seconds" in summary["metrics"]

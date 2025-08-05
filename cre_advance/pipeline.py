@@ -13,6 +13,7 @@ import pandas as pd
 
 from . import excel_normalizer, file_packager, pdf_segmenter
 from .utils import get_config, get_logger
+from .utils.pdf_utils import merge_pdfs
 
 logger = get_logger(__name__)
 
@@ -47,6 +48,17 @@ def run(args: Namespace, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     norm_path = staging_dir / f"normalized_{timestamp}.xlsx"
     manifest_path = staging_dir / f"manifest_{timestamp}.json"
+
+    if isinstance(args.pdf, list):
+        if len(args.pdf) > 1:
+            merged_path = staging_dir / f"merged_invoices_{timestamp}.pdf"
+            t0 = time.perf_counter()
+            pdf_count = len(args.pdf)
+            args.pdf = merge_pdfs(args.pdf, merged_path)
+            metrics["pdf_merge_seconds"] = time.perf_counter() - t0
+            logger.info("Merged %d PDFs into %s", pdf_count, args.pdf)
+        else:
+            args.pdf = args.pdf[0]
 
     normalized_df = None
     manifest = None
