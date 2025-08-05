@@ -127,16 +127,34 @@ class InvoiceSegmenter:
         """Fill missing metadata using an Excel log if available."""
         log = cfg.get("excel_log") or []
         for item in manifest:
-            for row in log:
-                if (
-                    str(row.get("invoice_number", "")).strip().lower()
-                    == item["invoice_number"].lower()
-                ):
-                    item["vendor"] = (
-                        item["vendor"] or str(row.get("vendor", "")).strip()
+            inv = item.get("invoice_number", "").strip().lower()
+            match = None
+            if inv:
+                for row in log:
+                    if str(row.get("invoice_number", "")).strip().lower() == inv:
+                        match = row
+                        break
+            else:
+                for row in log:
+                    vendor_match = (
+                        item.get("vendor", "").strip().lower()
+                        == str(row.get("vendor", "")).strip().lower()
                     )
-                    item["date"] = item["date"] or str(row.get("date", "")).strip()
-                    amount = str(row.get("amount", "")).strip()
-                    if not item["amount"] and amount:
-                        item["amount"] = amount
-                    break
+                    amount_match = (
+                        item.get("amount", "").strip()
+                        == str(row.get("amount", "")).strip()
+                    )
+                    if vendor_match and amount_match:
+                        match = row
+                        break
+
+            if match:
+                item["vendor"] = item["vendor"] or str(match.get("vendor", "")).strip()
+                item["date"] = item["date"] or str(match.get("date", "")).strip()
+                amount = str(match.get("amount", "")).strip()
+                if not item["amount"] and amount:
+                    item["amount"] = amount
+                if not inv:
+                    item["invoice_number"] = str(
+                        match.get("invoice_number", "")
+                    ).strip()
