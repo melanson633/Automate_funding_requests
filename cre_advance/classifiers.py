@@ -36,7 +36,9 @@ class GeminiClassifier(PageClassifier):
     async def _classify_single(self, pages: List[str], cfg: dict) -> List[dict]:
         batch_size = int(cfg.get("batch_size", 20))
         prompts = [
-            "\n---\n".join(pages[i : i + batch_size])
+            ai_gemini.load_prompt(
+                "classify_pages", cfg, pages=pages[i : i + batch_size]
+            )
             for i in range(0, len(pages), batch_size)
         ]
         responses = await ai_gemini.async_generate_content(

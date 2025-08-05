@@ -10,6 +10,12 @@ gemini_max_retries: 3
 concurrency_limit: 5
 batch_size: 20
 auto_save_schemas: true
+prompts:
+  system_instruction: configs/prompts/system_instruction.txt
+  classify_pages: configs/prompts/classify_pages_prompt.yaml
+  segment_pdf: configs/prompts/segment_pdf_prompt.yaml
+scoring:
+  classification_weight: 1.0
 packager:
   vendor_ratio_threshold: 0.8
   amount_tolerance: 0.01

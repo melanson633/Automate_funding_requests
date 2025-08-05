@@ -71,10 +71,14 @@ def test_gemini_classifier_batched(monkeypatch):
     seen: list[str] = []
 
     async def fake_async_generate_content(prompts, cfg, concurrency_limit=None):
-        seen.extend(prompts)
+        seen.extend([p[1]["parts"][0] for p in prompts])
         results = []
         for p in prompts:
-            pages = p.split("\n---\n")
+            text = p[1]["parts"][0]
+            if "\n---\n" in text:
+                pages = text.split("\n---\n")
+            else:
+                pages = [seg.strip() for seg in text.split("Page") if seg.strip()]
             results.append(ai_gemini.classify_pages(pages, cfg))
         return results
 
@@ -86,4 +90,5 @@ def test_gemini_classifier_batched(monkeypatch):
     cfg = {"batch_size": 2}
     res = asyncio.run(clf.classify_async(pages, cfg))
     assert len(res[0]) == 3
-    assert seen == ["Invoice\n---\nBill To", "Other"]
+    assert "Invoice" in seen[0] and "Bill To" in seen[0]
+    assert "Other" in seen[1]
