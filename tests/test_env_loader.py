@@ -168,3 +168,28 @@ def test_prompt_and_scoring_defaults(monkeypatch):
         assert scoring["classification_weight"] == 1.0
     finally:
         cfg_path.unlink()
+
+
+def test_report_types_merged(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    lender_name = "temp_report_lender"
+    lenders_dir = Path(__file__).resolve().parents[1] / "configs" / "lenders"
+    cfg_path = lenders_dir / f"{lender_name}.yaml"
+    cfg_path.write_text(
+        "report_types:\n"
+        "  general_ledger:\n"
+        "    header_row: 10\n"
+        "  custom_type:\n"
+        "    sheet_name: Custom\n"
+        "    header_row: 1\n"
+    )
+    try:
+        cfg = get_config(lender_name)
+        rtypes = cfg["report_types"]
+        assert rtypes["general_ledger"]["sheet_name"] == "Report1"
+        assert rtypes["general_ledger"]["header_row"] == 10
+        assert "expense_distribution" in rtypes
+        assert rtypes["custom_type"]["sheet_name"] == "Custom"
+        assert rtypes["custom_type"]["header_row"] == 1
+    finally:
+        cfg_path.unlink()

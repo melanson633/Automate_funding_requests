@@ -81,7 +81,11 @@ def get_config(lender: str) -> dict:
     if lender_path.is_file():
         with lender_path.open("r") as f:
             lender_cfg = yaml.safe_load(f) or {}
+        lender_reports = lender_cfg.pop("report_types", {})
         config = _merge_dicts(config, lender_cfg)
+        config["report_types"] = _merge_dicts(
+            config.get("report_types", {}), lender_reports
+        )
     else:
         raise ConfigError(f"Lender config not found: {lender_path}")
 
