@@ -1,0 +1,35 @@
+lender: "csb_12_inno_bank_draw"
+property: "Inno Bank Tower"
+draw_number: 12
+
+mapping_coverage_threshold: 0.7
+
+excel:
+  sheet_name: "Report1"
+  header_row: 6
+  force_schema_builder: false
+  use_ai_detection: true
+
+template:
+  sheet_name: "DRIVER"
+  header_row: 4
+  column_mapping:
+    "Vendor": "vendor_name"
+    "Invoice #": "invoice_number"
+
+report_types:
+  general_ledger:
+    header_row: 7
+  funding_template:
+    sheet_name: "CUSTOM_DRIVER"
+    header_row: 5
+
+packager:
+  vendor_ratio_threshold: 0.8
+  amount_tolerance: 0.01
+  score_threshold: 2.0
+
+pdf:
+  classification_confidence_threshold: 0.5
+  use_vision: false
+

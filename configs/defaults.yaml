@@ -10,6 +10,18 @@ gemini_max_retries: 3
 concurrency_limit: 5
 batch_size: 20
 auto_save_schemas: true
+report_types:
+  general_ledger:
+    sheet_name: "Report1"
+    header_row: 6
+    expected_columns: []
+  expense_distribution:
+    sheet_name: "Expense Distribution Report"
+    header_row: 3
+    expected_columns: []
+  funding_template:
+    sheet_name: "DRIVER"
+    header_row: 4
 prompts:
   system_instruction: configs/prompts/system_instruction.txt
   classify_pages: configs/prompts/classify_pages_prompt.yaml
