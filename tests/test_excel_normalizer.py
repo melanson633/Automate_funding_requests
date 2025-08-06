@@ -218,3 +218,5 @@ def test_normalize_report_detection(monkeypatch) -> None:
         types = {m["type"] for m in metrics["report_detections"]}
         assert "general_ledger" in types
         assert "expense_distribution" in types
+        assert all("method" in m and "confidence" in m for m in metrics["report_detections"])
+        assert all(m["method"] == "heuristic" for m in metrics["report_detections"])

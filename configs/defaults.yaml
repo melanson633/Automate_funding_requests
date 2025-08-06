@@ -10,6 +10,10 @@ gemini_max_retries: 3
 concurrency_limit: 5
 batch_size: 20
 auto_save_schemas: true
+excel:
+  use_ai_detection: true
+  ai_detection_threshold: 0.8
+  force_ai_detection: false
 report_types:
   general_ledger:
     sheet_name: "Report1"

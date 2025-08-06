@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import time
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Tuple
 
@@ -70,54 +71,110 @@ def _analyze_sheet_structure(df: pd.DataFrame, sheet_name: str) -> dict:
     return {"sheet_name": sheet_name, "header_row": best_row, "confidence": best_score}
 
 
-def detect_report_type(file_path: Path) -> dict:
-    """Detect the report type and header row for a workbook.
+@lru_cache(maxsize=32)
+def _ai_detect(path_str: str) -> Dict[str, Any]:
+    """Cached wrapper around :func:`ai_gemini.detect_excel_structure`."""
 
-    The function first checks for known Yardi report sheet names.  If none are
-    found, each sheet is analysed heuristically to guess the most likely header
-    row.  When no confident match is found, ``sheet_name`` and ``header_row``
-    are returned as ``None``.
+    return ai_gemini.detect_excel_structure(Path(path_str))
+
+
+def detect_report_type(file_path: Path, cfg: Dict[str, Any] | None = None) -> dict:
+    """Detect the report type, header row and confidence for a workbook.
+
+    The function first attempts heuristic detection of known Yardi report sheet
+    names. When heuristics produce a low-confidence result, Gemini is queried
+    for the sheet name and header row. Results from Gemini are cached per file
+    to avoid duplicate API calls.
 
     Parameters
     ----------
     file_path:
         Path to the Excel workbook.
+    cfg:
+        Optional Excel configuration containing ``use_ai_detection``,
+        ``ai_detection_threshold`` and ``force_ai_detection`` flags.
 
     Returns
     -------
     dict
-        ``{"type": str, "sheet_name": str | None, "header_row": int | None}``
-        where ``type`` is one of ``general_ledger``, ``expense_distribution``,
-        ``funding_template`` or ``unknown``.
+        ``{"type": str, "sheet_name": str | None, "header_row": int | None,
+        "confidence": float, "method": str}`` where ``type`` is one of
+        ``general_ledger``, ``expense_distribution``, ``funding_template`` or
+        ``unknown`` and ``method`` is ``heuristic`` or ``ai``.
     """
+
+    excel_cfg = cfg or {}
+    use_ai = bool(excel_cfg.get("use_ai_detection", True))
+    force_ai = bool(excel_cfg.get("force_ai_detection", False))
+    threshold = float(excel_cfg.get("ai_detection_threshold", 0.8))
+    if force_ai:
+        use_ai = True
+
     xls = pd.ExcelFile(file_path, engine="openpyxl")
     sheets = xls.sheet_names
 
-    if "Report1" in sheets:
-        return {"type": "general_ledger", "sheet_name": "Report1", "header_row": 6}
-    if "Expense Distribution Report" in sheets:
+    # Known report types: treat as high-confidence heuristic detection.
+    if "Report1" in sheets and not force_ai:
+        return {
+            "type": "general_ledger",
+            "sheet_name": "Report1",
+            "header_row": 6,
+            "confidence": 1.0,
+            "method": "heuristic",
+        }
+    if "Expense Distribution Report" in sheets and not force_ai:
         return {
             "type": "expense_distribution",
             "sheet_name": "Expense Distribution Report",
             "header_row": 3,
+            "confidence": 1.0,
+            "method": "heuristic",
         }
-    if "DRIVER" in sheets:
-        return {"type": "funding_template", "sheet_name": "DRIVER", "header_row": 4}
-
-    best = {"confidence": 0.0, "sheet_name": None, "header_row": None}
-    for sheet in sheets:
-        df = xls.parse(sheet, header=None, nrows=10)
-        info = _analyze_sheet_structure(df, sheet)
-        if info["confidence"] > best["confidence"]:
-            best = info
-
-    if best["confidence"] >= 0.6 and best["sheet_name"]:
+    if "DRIVER" in sheets and not force_ai:
         return {
-            "type": "unknown",
-            "sheet_name": best["sheet_name"],
-            "header_row": best["header_row"],
+            "type": "funding_template",
+            "sheet_name": "DRIVER",
+            "header_row": 4,
+            "confidence": 1.0,
+            "method": "heuristic",
         }
-    return {"type": "unknown", "sheet_name": None, "header_row": None}
+
+    def _heuristic_detection() -> Dict[str, Any]:
+        best = {"confidence": 0.0, "sheet_name": None, "header_row": None}
+        for sheet in sheets:
+            df = xls.parse(sheet, header=None, nrows=10)
+            info = _analyze_sheet_structure(df, sheet)
+            if info["confidence"] > best["confidence"]:
+                best = info
+        return best
+
+    detection = _heuristic_detection()
+    method = "heuristic"
+    report_type = "unknown"
+
+    if force_ai:
+        try:
+            ai_res = _ai_detect(str(file_path))
+            detection.update(ai_res)
+            method = "ai"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI detection failed; using heuristic fallback", exc_info=exc)
+    elif use_ai and detection.get("confidence", 0.0) < threshold:
+        try:
+            ai_res = _ai_detect(str(file_path))
+            if ai_res.get("confidence", 0.0) >= detection.get("confidence", 0.0):
+                detection.update(ai_res)
+                method = "ai"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI detection failed; continuing with heuristics", exc_info=exc)
+
+    return {
+        "type": report_type,
+        "sheet_name": detection.get("sheet_name"),
+        "header_row": detection.get("header_row"),
+        "confidence": detection.get("confidence", 0.0),
+        "method": method,
+    }
 
 
 def _fuzzy_match(
@@ -249,16 +306,16 @@ def normalize(
         report_type = "unknown"
         sheet = default_sheet
         header = default_header
+        method = "config"
+        confidence = 0.0
 
         if force_detection:
-            detection = detect_report_type(path)
+            detection = detect_report_type(path, excel_cfg)
             report_type = detection.get("type", "unknown")
-            if report_type != "unknown":
-                sheet = detection.get("sheet_name") or default_sheet
-                header = int(detection.get("header_row") or default_header)
-            else:
-                sheet = default_sheet
-                header = default_header
+            sheet = detection.get("sheet_name") or default_sheet
+            header = int(detection.get("header_row") or default_header)
+            method = detection.get("method", "heuristic")
+            confidence = float(detection.get("confidence", 0.0))
 
         overrides = excel_cfg.get("overrides", {}).get(report_type, {})
         sheet = overrides.get("sheet_name", sheet)
@@ -272,6 +329,8 @@ def normalize(
                 "type": report_type,
                 "sheet_name": sheet,
                 "header_row": header,
+                "method": method,
+                "confidence": confidence,
             }
         )
         logger.info(
@@ -282,6 +341,8 @@ def normalize(
                     "type": report_type,
                     "sheet": sheet,
                     "header_row": header,
+                    "method": method,
+                    "confidence": confidence,
                 }
             },
         )
