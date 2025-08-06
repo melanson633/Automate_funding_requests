@@ -1,35 +1,41 @@
-lender: "csb_12_inno_bank_draw"
-property: "Inno Bank Tower"
-draw_number: 12
+# Configuration for CSB 12 Inno Bank Draw
+lender: "csb_12_inno_bank_draw"  # Unique lender identifier
+property: "12 Inno Draw 2"       # Property name
+draw_number: 2                    # Current draw number
 
+# Global mapping coverage threshold for schema matching
 mapping_coverage_threshold: 0.7
 
-excel:
-  sheet_name: "Report1"
-  header_row: 6
-  force_schema_builder: false
-  use_ai_detection: true
+excel:  # Excel normalisation settings
+  mapping_coverage_threshold: 0.7  # Redundant entry for clarity
+  force_schema_builder: false      # Only build schema when necessary
+  use_ai_detection: true           # Enable AI-based column detection
 
-template:
-  sheet_name: "DRIVER"
-  header_row: 4
-  column_mapping:
-    "Vendor": "vendor_name"
-    "Invoice #": "invoice_number"
+template:  # Funding template layout
+  sheet_name: "INVOICES"          # Template worksheet name
+  header_row: 6                   # Header row index (1-based)
+  column_mapping: {}              # Template column -> normalised column
 
-report_types:
+report_types:  # Input report specifications
   general_ledger:
-    header_row: 7
+    sheet_name: "Report1"        # Default general ledger sheet
+    header_row: 6                 # Header row index
+    expected_columns: []          # Placeholder for required columns
+  expense_distribution:
+    sheet_name: "Expense Distribution Report"  # Default expense report
+    header_row: 3
+    expected_columns: []
   funding_template:
-    sheet_name: "CUSTOM_DRIVER"
-    header_row: 5
+    sheet_name: "INVOICES"       # Funding template sheet
+    header_row: 6
 
-packager:
-  vendor_ratio_threshold: 0.8
-  amount_tolerance: 0.01
-  score_threshold: 2.0
+pdf:  # PDF processing parameters
+  auto_merge: true                # Merge segmented invoices
+  remove_invoice_register: true   # Drop invoice register pages
+  classification_confidence_threshold: 0.6  # Minimum classification confidence
 
-pdf:
-  classification_confidence_threshold: 0.5
-  use_vision: false
+packager:  # Packaging thresholds
+  vendor_ratio_threshold: 0.8     # Fuzzy match threshold for vendors
+  amount_tolerance: 0.01          # Acceptable amount variance
+  score_threshold: 2.0            # Minimum score for invoice segmentation
 
