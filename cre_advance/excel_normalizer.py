@@ -143,13 +143,43 @@ def _fuzzy_match(
 
 
 def _read_workbook(path: Path, sheet_name: str, header_row: int) -> pd.DataFrame:
-    """Return DataFrame from the specified sheet using ``header_row``."""
-    df = pd.read_excel(
-        path,
-        sheet_name=sheet_name,
-        header=None,
-        engine="openpyxl",
-    )
+    """Return DataFrame from ``sheet_name`` using ``header_row``.
+
+    The function validates that ``sheet_name`` exists and that the provided
+    ``header_row`` contains mostly non-empty cells.  If the row is sparsely
+    populated, the first sufficiently populated row is used instead and a
+    warning is logged.
+    """
+
+    xls = pd.ExcelFile(path, engine="openpyxl")
+    if sheet_name not in xls.sheet_names:
+        raise ValueError(f"Sheet '{sheet_name}' not found in '{path}'")
+
+    df = xls.parse(sheet_name, header=None)
+
+    def _non_empty_ratio(row: pd.Series) -> float:
+        non_empty = row.dropna().astype(str).str.strip()
+        non_empty = non_empty[non_empty != ""]
+        return len(non_empty) / max(len(row), 1)
+
+    ratio = _non_empty_ratio(df.iloc[header_row - 1])
+    if ratio < 0.5:
+        logger.warning(
+            "Header row %s in sheet '%s' is mostly empty; falling back to first non-empty row",
+            header_row,
+            sheet_name,
+            extra={"context": {"file": str(path)}},
+        )
+        for idx, row in df.iterrows():
+            if _non_empty_ratio(row) >= 0.5:
+                header_row = idx + 1
+                break
+        ratio = _non_empty_ratio(df.iloc[header_row - 1])
+        if ratio < 0.5:
+            raise ValueError(
+                f"No suitable header row found in sheet '{sheet_name}' of '{path}'"
+            )
+
     headers = df.iloc[header_row - 1].tolist()
     data = df.iloc[header_row:]
     data.columns = headers
@@ -185,8 +215,12 @@ def normalize(
         One or more Excel file paths.
     cfg:
         Configuration dictionary. Keys under ``excel`` include ``header_row``
-        (default ``4``), ``force_schema_builder`` and ``fields``. The lender
-        name should be stored in ``cfg['lender']``.
+        (default ``4``), ``sheet_name``, ``force_sheet_detection`` and
+        ``fields``. The lender name should be stored in ``cfg['lender']``.
+        If ``force_sheet_detection`` is true (default), each workbook is
+        analysed via :func:`detect_report_type` to determine the appropriate
+        sheet and header row.  Overrides for specific report types can be
+        provided under ``excel['overrides']``.
 
     Raises
     ------
@@ -204,11 +238,59 @@ def normalize(
         extra={"context": {"file": str(wb_paths[0])}},
     )
     excel_cfg = cfg.get("excel", {})
-    header_row = int(excel_cfg.get("header_row", 4))
-    sheet_name = excel_cfg.get("sheet_name", "Driver")
+    force_detection = excel_cfg.get("force_sheet_detection", True)
+    default_header = int(excel_cfg.get("header_row", 4))
+    default_sheet = excel_cfg.get("sheet_name", "Driver")
 
-    frames = [_read_workbook(p, sheet_name, header_row) for p in wb_paths]
-    raw_df = pd.concat(frames, ignore_index=True)
+    frames_by_type: dict[str, list[pd.DataFrame]] = {}
+    detections: list[dict[str, Any]] = []
+
+    for path in wb_paths:
+        report_type = "unknown"
+        sheet = default_sheet
+        header = default_header
+
+        if force_detection:
+            detection = detect_report_type(path)
+            report_type = detection.get("type", "unknown")
+            if report_type != "unknown":
+                sheet = detection.get("sheet_name") or default_sheet
+                header = int(detection.get("header_row") or default_header)
+            else:
+                sheet = default_sheet
+                header = default_header
+
+        overrides = excel_cfg.get("overrides", {}).get(report_type, {})
+        sheet = overrides.get("sheet_name", sheet)
+        header = int(overrides.get("header_row", header))
+
+        df = _read_workbook(path, sheet, header)
+        frames_by_type.setdefault(report_type, []).append(df)
+        detections.append(
+            {
+                "file": str(path),
+                "type": report_type,
+                "sheet_name": sheet,
+                "header_row": header,
+            }
+        )
+        logger.info(
+            "Workbook loaded",
+            extra={
+                "context": {
+                    "file": str(path),
+                    "type": report_type,
+                    "sheet": sheet,
+                    "header_row": header,
+                }
+            },
+        )
+
+    frames = [pd.concat(dfs, ignore_index=True) for dfs in frames_by_type.values()]
+    raw_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    if metrics is not None:
+        metrics["report_detections"] = detections
 
     headers = list(raw_df.columns)
     samples = raw_df.head(5).to_dict(orient="records")

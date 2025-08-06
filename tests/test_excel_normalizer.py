@@ -4,8 +4,10 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+import pytest
 import yaml
 from openpyxl import Workbook
 
@@ -80,9 +82,7 @@ def test_header_row_config(monkeypatch) -> None:
             "map_headers",
             lambda h, s, f: {"Date": "Date", "Amount": "Amount"},
         )
-        monkeypatch.setattr(
-            excel_normalizer.ai_gemini, "build_schema", lambda h, s: {}
-        )
+        monkeypatch.setattr(excel_normalizer.ai_gemini, "build_schema", lambda h, s: {})
 
         cfg = {"lender": "x", "excel": {"fields": ["Date", "Amount"], "header_row": 3}}
         normalized, _ = excel_normalizer.normalize([excel_path], cfg)
@@ -145,9 +145,7 @@ def test_fuzzy_fallback(monkeypatch) -> None:
             "map_headers",
             lambda h, s, f: {},
         )
-        monkeypatch.setattr(
-            excel_normalizer.ai_gemini, "build_schema", lambda h, s: {}
-        )
+        monkeypatch.setattr(excel_normalizer.ai_gemini, "build_schema", lambda h, s: {})
 
         cfg = {
             "lender": "x",
@@ -157,3 +155,66 @@ def test_fuzzy_fallback(monkeypatch) -> None:
         normalized, _ = excel_normalizer.normalize([excel_path], cfg)
 
         assert list(normalized.columns) == ["Date", "Amount"]
+
+
+def test_read_workbook_missing_sheet(tmp_path: Path) -> None:
+    path = tmp_path / "wb.xlsx"
+    _create_workbook(path)
+    with pytest.raises(ValueError):
+        excel_normalizer._read_workbook(path, "Missing", 4)
+
+
+def test_read_workbook_header_fallback(tmp_path: Path) -> None:
+    path = tmp_path / "wb.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append([])
+    ws.append(["A", "B"])
+    ws.append([1, 2])
+    wb.save(path)
+
+    df = excel_normalizer._read_workbook(path, "Data", 1)
+    assert list(df.columns) == ["A", "B"]
+
+
+def test_normalize_report_detection(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        gl_path = Path(tmp) / "gl.xlsx"
+        ed_path = Path(tmp) / "ed.xlsx"
+
+        # General ledger workbook
+        wb1 = Workbook()
+        ws1 = wb1.active
+        ws1.title = "Report1"
+        for _ in range(5):
+            ws1.append([])
+        ws1.append(["Date", "Amount"])
+        ws1.append(["2024-01-01", "100"])
+        wb1.save(gl_path)
+
+        # Expense distribution workbook
+        wb2 = Workbook()
+        ws2 = wb2.active
+        ws2.title = "Expense Distribution Report"
+        for _ in range(2):
+            ws2.append([])
+        ws2.append(["Date", "Amount"])
+        ws2.append(["2024-01-02", "200"])
+        wb2.save(ed_path)
+
+        monkeypatch.setattr(
+            excel_normalizer.ai_gemini,
+            "map_headers",
+            lambda h, s, f: {"Date": "Date", "Amount": "Amount"},
+        )
+        monkeypatch.setattr(excel_normalizer.ai_gemini, "build_schema", lambda h, s: {})
+
+        cfg = {"lender": "x", "excel": {"fields": ["Date", "Amount"]}}
+        metrics: dict[str, Any] = {}
+        normalized, _ = excel_normalizer.normalize([gl_path, ed_path], cfg, metrics)
+
+        assert normalized.shape[0] == 2
+        types = {m["type"] for m in metrics["report_detections"]}
+        assert "general_ledger" in types
+        assert "expense_distribution" in types
