@@ -7,6 +7,7 @@ from pathlib import Path
 
 import google.api_core  # noqa: F401
 import pytest
+import pandas as pd
 from google.api_core import exceptions as google_exceptions
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -218,3 +219,37 @@ async def test_async_generate_content(monkeypatch):
     )
     assert res == ["resp:a", "resp:b", "resp:c"]
     assert counter["max"] <= 2
+
+
+def test_analyze_excel_content():
+    sheets = {"Sheet1": [["A", "B"], ["1", "2"]]}
+    prompt = ai_gemini._analyze_excel_content(sheets)
+    assert "Sheet: Sheet1" in prompt
+    assert "sheet_name" in prompt and "header_row" in prompt
+
+
+def test_detect_excel_structure_cached(tmp_path, monkeypatch):
+    df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+    path = tmp_path / "wb.xlsx"
+    df.to_excel(path, index=False, sheet_name="Data")
+
+    calls = []
+
+    def fake_invoke(prompt):
+        calls.append(prompt)
+        return {
+            "sheet_name": "Data",
+            "header_row": 1,
+            "confidence": 0.9,
+            "reasoning": "rows",
+        }
+
+    monkeypatch.setattr(ai_gemini, "_invoke_model", fake_invoke)
+    ai_gemini.detect_excel_structure.cache_clear()
+
+    first = ai_gemini.detect_excel_structure(path)
+    second = ai_gemini.detect_excel_structure(path)
+
+    assert first["sheet_name"] == "Data"
+    assert second == first
+    assert len(calls) == 1

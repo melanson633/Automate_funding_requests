@@ -13,12 +13,14 @@ import json
 import os
 import re
 import types as pytypes
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, List
 
 import yaml
+import pandas as pd
 from jinja2 import Template
 
 try:  # pragma: no cover - import guard for tests
@@ -296,6 +298,75 @@ detect_invoice_starts.cache_clear = (  # type: ignore[attr-defined]
     _detect_invoice_starts_cached.cache_clear
 )
 
+
+@lru_cache(maxsize=_CACHE_MAXSIZE)
+def _detect_excel_structure_cached(file_hash: str, prompt: str) -> Dict[str, Any]:
+    """Invoke Gemini to identify workbook structure."""
+
+    response = _invoke_model(prompt)
+    if isinstance(response, dict):
+        data = response
+    elif isinstance(response, str):
+        try:
+            data = json.loads(response)
+        except json.JSONDecodeError:
+            data = {}
+    else:
+        data = getattr(response, "parsed", {}) or {}
+
+    return {
+        "sheet_name": data.get("sheet_name", ""),
+        "header_row": int(data.get("header_row", 0) or 0),
+        "confidence": float(data.get("confidence", 0.0) or 0.0),
+        "reasoning": data.get("reasoning", ""),
+    }
+
+
+def detect_excel_structure(file_path: Path) -> Dict[str, Any]:
+    """Detect the sheet containing tabular data and its header row."""
+
+    file_path = Path(file_path)
+    file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+    sheets = pd.read_excel(file_path, sheet_name=None, nrows=10, header=None)
+    sheets_data: Dict[str, List[List[Any]]] = {}
+    for name, df in sheets.items():
+        rows = df.fillna(" ").astype(str).values.tolist()
+        sheets_data[name] = rows
+
+    prompt = _analyze_excel_content(sheets_data)
+    return dict(_detect_excel_structure_cached(file_hash, prompt))
+
+
+detect_excel_structure.cache_info = _detect_excel_structure_cached.cache_info  # type: ignore[attr-defined]
+detect_excel_structure.cache_clear = _detect_excel_structure_cached.cache_clear  # type: ignore[attr-defined]
+
+
+def _analyze_excel_content(sheets_data: Dict[str, List[List[Any]]]) -> str:
+    """Format sheet samples into a concise prompt for Gemini."""
+
+    max_chars = 8000
+    instruction = (
+        "Determine which sheet has tabular data and the 1-indexed row "
+        "number containing column headers (not titles). Respond in JSON "
+        "with keys sheet_name, header_row, confidence, reasoning."
+    )
+    lines: List[str] = [instruction]
+    current_len = len(instruction)
+
+    for sheet_name, rows in sheets_data.items():
+        section_lines = [f"\nSheet: {sheet_name}"]
+        for row in rows[:10]:
+            row_text = " | ".join("" if c is None else str(c) for c in row)
+            section_lines.append(row_text)
+        section = "\n".join(section_lines)
+        if current_len + len(section) > max_chars:
+            break
+        lines.append(section)
+        current_len += len(section)
+
+    prompt = "\n".join(lines)
+    return prompt[:max_chars]
 
 def build_schema(
     headers: List[str], sample_rows: List[Dict[str, Any]]
